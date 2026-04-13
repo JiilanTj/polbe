@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { swaggerUI } from "@hono/swagger-ui";
 import { registerRoutes } from "./src/api";
 import { wsHandler } from "./src/ws/handler";
 import { startScheduler } from "./src/jobs/scheduler";
@@ -14,10 +15,21 @@ app.use("*", cors());
 // Register all domain routes
 registerRoutes(app);
 
+// ─── Swagger Docs ────────────────────────────────────────────
+app.get("/swagger.yml", async (c) => {
+  const file = Bun.file("./swagger.yml");
+  return new Response(await file.text(), {
+    headers: { "Content-Type": "text/yaml" },
+  });
+});
+
+app.get("/docs", swaggerUI({ url: "/swagger.yml" }));
+
 app.get("/", (c) => {
   return c.json({
     name: "Polymarket Backend",
     version: "1.0.0",
+    docs: "/docs",
     endpoints: {
       news: "/api/news",
       trends: "/api/trends",

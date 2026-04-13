@@ -19,7 +19,10 @@ export const config = {
   rssFeeds: [
     { name: "Google News", url: "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en" },
     { name: "Google News - World", url: "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx1YlY4U0FtVnVHZ0pWVXlnQVAB?hl=en-US&gl=US&ceid=US:en" },
-    { name: "Reuters - World", url: "https://www.reutersagency.com/feed/?best-topics=political-general&post_type=best" },
-    { name: "AP News", url: "https://rsshub.app/apnews/topics/apf-topnews" },
+    { name: "Google News - Business", url: "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtVnVHZ0pWVXlnQVAB?hl=en-US&gl=US&ceid=US:en" },
+    { name: "Google News - Technology", url: "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGRqTVhZU0FtVnVHZ0pWVXlnQVAB?hl=en-US&gl=US&ceid=US:en" },
+    { name: "BBC News", url: "https://feeds.bbci.co.uk/news/world/rss.xml" },
+    { name: "CNN Top Stories", url: "http://rss.cnn.com/rss/edition.rss" },
+    { name: "Al Jazeera", url: "https://www.aljazeera.com/xml/rss/all.xml" },
   ],
 } as const;

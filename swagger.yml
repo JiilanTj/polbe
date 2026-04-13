@@ -1,0 +1,442 @@
+openapi: "3.0.3"
+
+info:
+  title: Polymarket Backend API
+  description: |
+    Backend API untuk scraping news, mendeteksi trend, dan auto-generate 
+    Polymarket-style prediction market questions menggunakan AI (OpenAI).
+  version: "1.0.0"
+  contact:
+    name: Polymarket Backend
+
+servers:
+  - url: http://localhost:3000
+    description: Local development
+
+tags:
+  - name: News
+    description: Scraped news articles
+  - name: Trends
+    description: Trending topics detected by AI
+  - name: Questions
+    description: AI-generated Polymarket-style prediction questions
+  - name: Scrape
+    description: Manual scraping triggers
+
+paths:
+  # ─── News ──────────────────────────────────────────────
+  /api/news:
+    get:
+      tags: [News]
+      summary: List scraped articles
+      description: Returns paginated list of scraped news articles with optional filtering by category and source.
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+          description: Page number
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+          description: Items per page (max 100)
+        - name: category
+          in: query
+          schema:
+            type: string
+            enum: [politics, economy, crypto, technology, world, sports, entertainment, science, health]
+          description: Filter by category
+        - name: source
+          in: query
+          schema:
+            type: string
+          description: Filter by source (partial match)
+      responses:
+        "200":
+          description: Paginated list of articles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Article"
+                  pagination:
+                    $ref: "#/components/schemas/Pagination"
+
+  /api/news/{id}:
+    get:
+      tags: [News]
+      summary: Get article by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Article ID
+      responses:
+        "200":
+          description: Article detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Article"
+        "404":
+          description: Article not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ─── Trends ────────────────────────────────────────────
+  /api/trends:
+    get:
+      tags: [Trends]
+      summary: List trending topics
+      description: Returns trending topics sorted by trend score (highest first).
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+          description: Max number of trends to return
+      responses:
+        "200":
+          description: List of trending topics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Trend"
+
+  /api/trends/{topic}:
+    get:
+      tags: [Trends]
+      summary: Get trend detail by topic
+      description: Returns trend info with related articles whose title matches the topic.
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Topic name (exact match)
+      responses:
+        "200":
+          description: Trend detail with related articles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    allOf:
+                      - $ref: "#/components/schemas/Trend"
+                      - type: object
+                        properties:
+                          relatedArticles:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/Article"
+        "400":
+          description: Missing topic parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Trend not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ─── Questions ─────────────────────────────────────────
+  /api/questions:
+    get:
+      tags: [Questions]
+      summary: List generated questions
+      description: Returns paginated list of AI-generated Polymarket-style prediction questions.
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+          description: Page number
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+          description: Items per page (max 100)
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, published, resolved]
+          description: Filter by question status
+      responses:
+        "200":
+          description: Paginated list of questions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/GeneratedQuestion"
+                  pagination:
+                    $ref: "#/components/schemas/Pagination"
+
+  /api/questions/{id}:
+    get:
+      tags: [Questions]
+      summary: Get question by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Question ID
+      responses:
+        "200":
+          description: Question detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/GeneratedQuestion"
+        "404":
+          description: Question not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/questions/generate:
+    post:
+      tags: [Questions]
+      summary: Manually generate questions
+      description: |
+        Triggers AI question generation based on the 30 most recent scraped articles.
+        Uses OpenAI to create Polymarket-style YES/NO prediction questions.
+      responses:
+        "200":
+          description: Questions generated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Generated 5 questions"
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/GeneratedQuestionAI"
+
+  # ─── Scrape ────────────────────────────────────────────
+  /api/scrape/trigger:
+    post:
+      tags: [Scrape]
+      summary: Trigger manual scrape
+      description: |
+        Triggers a full scraping job (RSS + NewsAPI), followed by AI processing 
+        (sentiment analysis, trend detection, question generation). Runs async in background.
+      responses:
+        "200":
+          description: Scrape job triggered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Scrape job triggered"
+
+components:
+  schemas:
+    Article:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        title:
+          type: string
+          example: "Trump threatens new tariffs on China amid trade war escalation"
+        description:
+          type: string
+          nullable: true
+          example: "The US president announced potential new tariffs..."
+        content:
+          type: string
+          nullable: true
+        url:
+          type: string
+          format: uri
+          example: "https://example.com/article/123"
+        source:
+          type: string
+          example: "Google News"
+        category:
+          type: string
+          nullable: true
+          enum: [politics, economy, crypto, technology, world, sports, entertainment, science, health]
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        scrapedAt:
+          type: string
+          format: date-time
+        sentiment:
+          type: string
+          nullable: true
+          enum: [positive, negative, neutral]
+        sentimentScore:
+          type: number
+          nullable: true
+          minimum: -1
+          maximum: 1
+          example: 0.35
+
+    Trend:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        topic:
+          type: string
+          example: "US-China Trade War"
+        mentionCount:
+          type: integer
+          example: 12
+        category:
+          type: string
+          nullable: true
+        firstSeen:
+          type: string
+          format: date-time
+        lastSeen:
+          type: string
+          format: date-time
+        trendScore:
+          type: number
+          example: 85.5
+
+    GeneratedQuestion:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        question:
+          type: string
+          example: "Will Trump impose new tariffs on China before July 2026?"
+        description:
+          type: string
+          nullable: true
+          example: "Based on recent trade tensions, this question asks whether..."
+        category:
+          type: string
+          nullable: true
+        sourceArticleIds:
+          type: array
+          nullable: true
+          items:
+            type: integer
+        resolutionDate:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        aiModel:
+          type: string
+          nullable: true
+          example: "gpt-4o"
+        confidenceScore:
+          type: number
+          nullable: true
+          example: 0.85
+        status:
+          type: string
+          enum: [draft, published, resolved]
+          example: "draft"
+
+    GeneratedQuestionAI:
+      type: object
+      description: Raw AI output before saving to DB
+      properties:
+        question:
+          type: string
+          example: "Will Trump impose new tariffs on China before July 2026?"
+        description:
+          type: string
+          example: "Resolution criteria: New tariffs officially announced..."
+        category:
+          type: string
+          example: "politics"
+        resolutionDate:
+          type: string
+          format: date
+          example: "2026-07-01"
+        confidenceScore:
+          type: number
+          example: 0.85
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        total:
+          type: integer
+          example: 150
+        totalPages:
+          type: integer
+          example: 8
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "Not found"
