@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import { db } from "../../db";
 import { articles } from "../../db/schema";
 import { desc, eq, like, sql } from "drizzle-orm";
+import { scrapeArticleContent } from "../../scrapers/content";
 
 export const newsController = {
   async list(c: Context) {
@@ -40,6 +41,20 @@ export const newsController = {
     const [article] = await db.select().from(articles).where(eq(articles.id, id));
 
     if (!article) return c.json({ error: "Article not found" }, 404);
+
+    // Auto-enrich: if content is missing, truncated, or too short — scrape on-demand
+    const needsEnrich = !article.content 
+      || (article.content.includes("[+") && article.content.includes("chars]"))
+      || article.content.length < 300;
+
+    if (needsEnrich) {
+      const fullContent = await scrapeArticleContent(article.url);
+      if (fullContent && fullContent.length > (article.content?.length ?? 0)) {
+        await db.update(articles).set({ content: fullContent }).where(eq(articles.id, id));
+        article.content = fullContent;
+      }
+    }
+
     return c.json({ data: article });
   },
 };

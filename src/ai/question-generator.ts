@@ -61,8 +61,9 @@ Return ONLY valid JSON, no markdown.`,
     temperature: 0.7,
   });
 
-  const content = response.choices[0]?.message?.content;
-  if (!content) return [];
+  const raw = response.choices[0]?.message?.content;
+  if (!raw) return [];
+  const content = raw.replace(/```(?:json)?\s*/g, "").replace(/```/g, "").trim();
 
   try {
     return JSON.parse(content) as GeneratedQuestion[];

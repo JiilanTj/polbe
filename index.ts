@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { serveStatic } from "hono/bun";
 import { swaggerUI } from "@hono/swagger-ui";
 import { registerRoutes } from "./src/api";
 import { wsHandler } from "./src/ws/handler";
@@ -25,10 +26,21 @@ app.get("/swagger.yml", async (c) => {
 
 app.get("/docs", swaggerUI({ url: "/swagger.yml" }));
 
+// ─── Admin Panel ─────────────────────────────────────────────
+app.get("/admin", async (c) => {
+  const file = Bun.file("./public/index.html");
+  return new Response(await file.text(), {
+    headers: { "Content-Type": "text/html" },
+  });
+});
+
+app.use("/public/*", serveStatic({ root: "./" }));
+
 app.get("/", (c) => {
   return c.json({
     name: "Polymarket Backend",
     version: "1.0.0",
+    admin: "/admin",
     docs: "/docs",
     endpoints: {
       news: "/api/news",

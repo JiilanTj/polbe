@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-gray-950">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Polymarket Admin</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50: '#eef2ff', 100: '#e0e7ff', 400: '#818cf8', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca', 900: '#312e81' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    .tab-active { border-color: #6366f1; color: #818cf8; background: rgba(99,102,241,0.08); }
+    .fade-in { animation: fadeIn 0.3s ease-in; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    .badge { @apply text-xs font-medium px-2.5 py-0.5 rounded-full; }
+    .live-dot { @apply inline-block w-2 h-2 rounded-full bg-green-500 mr-1; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #1a1a2e; }
+    ::-webkit-scrollbar-thumb { background: #4338ca; border-radius: 3px; }
+  </style>
+</head>
+
+<body class="h-full dark text-gray-200">
+  <div class="flex h-full">
+    <!-- Sidebar -->
+    <aside class="w-64 bg-gray-900 border-r border-gray-800 flex flex-col">
+      <div class="p-5 border-b border-gray-800">
+        <h1 class="text-xl font-bold text-white flex items-center gap-2">
+          <svg class="w-7 h-7 text-brand-500" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+          Polymarket
+        </h1>
+        <p class="text-xs text-gray-500 mt-1">Admin Panel</p>
+      </div>
+      <nav class="flex-1 p-3 space-y-1">
+        <button onclick="switchTab('dashboard')" id="tab-dashboard" class="tab-btn w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium text-gray-400 hover:bg-gray-800 hover:text-white transition flex items-center gap-3">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
+          Dashboard
+        </button>
+        <button onclick="switchTab('news')" id="tab-news" class="tab-btn w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium text-gray-400 hover:bg-gray-800 hover:text-white transition flex items-center gap-3">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z"/></svg>
+          News Articles
+        </button>
+        <button onclick="switchTab('trends')" id="tab-trends" class="tab-btn w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium text-gray-400 hover:bg-gray-800 hover:text-white transition flex items-center gap-3">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+          Trends
+        </button>
+        <button onclick="switchTab('questions')" id="tab-questions" class="tab-btn w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium text-gray-400 hover:bg-gray-800 hover:text-white transition flex items-center gap-3">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          Questions
+        </button>
+        <button onclick="switchTab('live')" id="tab-live" class="tab-btn w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium text-gray-400 hover:bg-gray-800 hover:text-white transition flex items-center gap-3">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          Live Feed
+        </button>
+      </nav>
+      <div class="p-4 border-t border-gray-800">
+        <div class="flex items-center gap-2 text-xs text-gray-500">
+          <span class="live-dot" id="ws-dot"></span>
+          <span id="ws-status">Connecting...</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="flex-1 overflow-y-auto">
+      <!-- Header -->
+      <header class="sticky top-0 z-10 bg-gray-950/80 backdrop-blur border-b border-gray-800 px-6 py-4 flex items-center justify-between">
+        <h2 id="page-title" class="text-lg font-semibold text-white">Dashboard</h2>
+        <div class="flex gap-2">
+          <button onclick="triggerScrape()" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-lg transition flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            Scrape Now
+          </button>
+          <button onclick="triggerGenerate()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg transition flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+            Generate Questions
+          </button>
+        </div>
+      </header>
+
+      <div class="p-6">
+        <!-- Dashboard -->
+        <section id="page-dashboard" class="fade-in">
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+              <p class="text-sm text-gray-400">Total Articles</p>
+              <p class="text-3xl font-bold text-white mt-1" id="stat-articles">-</p>
+            </div>
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+              <p class="text-sm text-gray-400">Active Trends</p>
+              <p class="text-3xl font-bold text-white mt-1" id="stat-trends">-</p>
+            </div>
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+              <p class="text-sm text-gray-400">Generated Questions</p>
+              <p class="text-3xl font-bold text-white mt-1" id="stat-questions">-</p>
+            </div>
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+              <p class="text-sm text-gray-400">Draft Questions</p>
+              <p class="text-3xl font-bold text-white mt-1" id="stat-drafts">-</p>
+            </div>
+          </div>
+
+          <!-- Recent -->
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="bg-gray-900 border border-gray-800 rounded-xl">
+              <div class="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+                <h3 class="font-semibold text-white">Latest News</h3>
+                <button onclick="switchTab('news')" class="text-xs text-brand-400 hover:underline">View All</button>
+              </div>
+              <div id="dashboard-news" class="divide-y divide-gray-800 max-h-96 overflow-y-auto"></div>
+            </div>
+            <div class="bg-gray-900 border border-gray-800 rounded-xl">
+              <div class="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+                <h3 class="font-semibold text-white">Top Trends</h3>
+                <button onclick="switchTab('trends')" class="text-xs text-brand-400 hover:underline">View All</button>
+              </div>
+              <div id="dashboard-trends" class="divide-y divide-gray-800 max-h-96 overflow-y-auto"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- News -->
+        <section id="page-news" class="hidden fade-in">
+          <div class="flex gap-3 mb-4">
+            <select id="news-source" onchange="loadNews()" class="bg-gray-900 border border-gray-700 text-sm rounded-lg px-3 py-2 text-gray-300">
+              <option value="">All Sources</option>
+            </select>
+            <select id="news-category" onchange="loadNews()" class="bg-gray-900 border border-gray-700 text-sm rounded-lg px-3 py-2 text-gray-300">
+              <option value="">All Categories</option>
+              <option>politics</option><option>economy</option><option>crypto</option><option>technology</option>
+              <option>world</option><option>sports</option><option>entertainment</option><option>science</option><option>health</option>
+            </select>
+          </div>
+          <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+            <table class="w-full text-sm">
+              <thead class="bg-gray-800/50 text-gray-400 text-xs uppercase">
+                <tr>
+                  <th class="px-4 py-3 text-left">Title</th>
+                  <th class="px-4 py-3 text-left w-32">Source</th>
+                  <th class="px-4 py-3 text-left w-28">Category</th>
+                  <th class="px-4 py-3 text-left w-24">Sentiment</th>
+                  <th class="px-4 py-3 text-left w-40">Published</th>
+                </tr>
+              </thead>
+              <tbody id="news-table" class="divide-y divide-gray-800"></tbody>
+            </table>
+          </div>
+          <div class="flex items-center justify-between mt-4">
+            <span id="news-info" class="text-sm text-gray-500"></span>
+            <div class="flex gap-2">
+              <button onclick="newsPage > 1 && (newsPage--, loadNews())" class="px-3 py-1.5 bg-gray-800 rounded-lg text-sm hover:bg-gray-700 transition">Prev</button>
+              <button onclick="newsPage++; loadNews()" class="px-3 py-1.5 bg-gray-800 rounded-lg text-sm hover:bg-gray-700 transition">Next</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Trends -->
+        <section id="page-trends" class="hidden fade-in">
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="trends-grid"></div>
+        </section>
+
+        <!-- Questions -->
+        <section id="page-questions" class="hidden fade-in">
+          <div class="flex gap-3 mb-4">
+            <select id="q-status" onchange="loadQuestions()" class="bg-gray-900 border border-gray-700 text-sm rounded-lg px-3 py-2 text-gray-300">
+              <option value="">All Status</option>
+              <option>draft</option><option>published</option><option>resolved</option>
+            </select>
+          </div>
+          <div class="space-y-3" id="questions-list"></div>
+          <div class="flex items-center justify-between mt-4">
+            <span id="q-info" class="text-sm text-gray-500"></span>
+            <div class="flex gap-2">
+              <button onclick="qPage > 1 && (qPage--, loadQuestions())" class="px-3 py-1.5 bg-gray-800 rounded-lg text-sm hover:bg-gray-700 transition">Prev</button>
+              <button onclick="qPage++; loadQuestions()" class="px-3 py-1.5 bg-gray-800 rounded-lg text-sm hover:bg-gray-700 transition">Next</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Live Feed -->
+        <section id="page-live" class="hidden fade-in">
+          <div class="bg-gray-900 border border-gray-800 rounded-xl">
+            <div class="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+              <h3 class="font-semibold text-white flex items-center gap-2"><span class="live-dot"></span> Live WebSocket Feed</h3>
+              <button onclick="document.getElementById('live-log').innerHTML=''" class="text-xs text-gray-500 hover:text-gray-300">Clear</button>
+            </div>
+            <div id="live-log" class="p-4 max-h-[600px] overflow-y-auto font-mono text-xs space-y-1"></div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- Article Detail Modal -->
+  <div id="article-modal" class="fixed inset-0 z-40 hidden">
+    <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeArticleModal()"></div>
+    <div class="absolute inset-y-0 right-0 w-full max-w-2xl bg-gray-900 border-l border-gray-800 shadow-2xl overflow-y-auto">
+      <div class="sticky top-0 bg-gray-900/90 backdrop-blur border-b border-gray-800 px-6 py-4 flex items-center justify-between z-10">
+        <h3 class="font-semibold text-white text-sm">Article Detail</h3>
+        <button onclick="closeArticleModal()" class="text-gray-400 hover:text-white transition">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div id="article-modal-content" class="p-6"></div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="fixed bottom-6 right-6 z-50 hidden">
+    <div class="bg-gray-800 border border-gray-700 rounded-xl px-5 py-3 shadow-2xl flex items-center gap-3">
+      <span id="toast-icon"></span>
+      <span id="toast-msg" class="text-sm"></span>
+    </div>
+  </div>
+
+  <script>
+    const API = '';
+    let newsPage = 1;
+    let qPage = 1;
+
+    // ─── Tab Switching ─────────────────────────────────
+    function switchTab(tab) {
+      document.querySelectorAll('[id^="page-"]').forEach(el => el.classList.add('hidden'));
+      document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('tab-active'));
+      document.getElementById(`page-${tab}`).classList.remove('hidden');
+      document.getElementById(`tab-${tab}`).classList.add('tab-active');
+
+      const titles = { dashboard: 'Dashboard', news: 'News Articles', trends: 'Trends', questions: 'Questions', live: 'Live Feed' };
+      document.getElementById('page-title').textContent = titles[tab];
+
+      if (tab === 'dashboard') loadDashboard();
+      if (tab === 'news') loadNews();
+      if (tab === 'trends') loadTrends();
+      if (tab === 'questions') loadQuestions();
+    }
+
+    // ─── API Helpers ───────────────────────────────────
+    async function api(path) {
+      const res = await fetch(`${API}${path}`);
+      return res.json();
+    }
+
+    function timeAgo(date) {
+      if (!date) return '-';
+      const s = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
+      if (s < 60) return `${s}s ago`;
+      if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+      if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+      return `${Math.floor(s / 86400)}d ago`;
+    }
+
+    function sentimentBadge(s) {
+      if (!s) return '<span class="badge bg-gray-800 text-gray-500">-</span>';
+      const colors = { positive: 'bg-green-900/50 text-green-400', negative: 'bg-red-900/50 text-red-400', neutral: 'bg-gray-800 text-gray-400' };
+      return `<span class="badge ${colors[s] || colors.neutral}">${s}</span>`;
+    }
+
+    function categoryBadge(c) {
+      if (!c) return '';
+      const colors = {
+        politics: 'bg-purple-900/50 text-purple-400', economy: 'bg-yellow-900/50 text-yellow-400',
+        crypto: 'bg-orange-900/50 text-orange-400', technology: 'bg-blue-900/50 text-blue-400',
+        world: 'bg-cyan-900/50 text-cyan-400', sports: 'bg-green-900/50 text-green-400',
+        entertainment: 'bg-pink-900/50 text-pink-400', science: 'bg-indigo-900/50 text-indigo-400',
+        health: 'bg-red-900/50 text-red-400',
+      };
+      return `<span class="badge ${colors[c] || 'bg-gray-800 text-gray-400'}">${c}</span>`;
+    }
+
+    function statusBadge(s) {
+      const colors = { draft: 'bg-yellow-900/50 text-yellow-400', published: 'bg-green-900/50 text-green-400', resolved: 'bg-blue-900/50 text-blue-400' };
+      return `<span class="badge ${colors[s] || 'bg-gray-800 text-gray-400'}">${s}</span>`;
+    }
+
+    // ─── Dashboard ─────────────────────────────────────
+    async function loadDashboard() {
+      const [news, trends, questions, drafts] = await Promise.all([
+        api('/api/news?limit=5'),
+        api('/api/trends?limit=5'),
+        api('/api/questions?limit=100'),
+        api('/api/questions?status=draft&limit=100'),
+      ]);
+
+      document.getElementById('stat-articles').textContent = news.pagination?.total ?? 0;
+      document.getElementById('stat-trends').textContent = trends.data?.length ?? 0;
+      document.getElementById('stat-questions').textContent = questions.pagination?.total ?? 0;
+      document.getElementById('stat-drafts').textContent = drafts.pagination?.total ?? 0;
+
+      document.getElementById('dashboard-news').innerHTML = (news.data || []).map(a => `
+        <div class="px-5 py-3 hover:bg-gray-800/50 transition">
+          <a href="${escapeHtml(a.url)}" target="_blank" class="text-sm font-medium text-gray-200 hover:text-brand-400 line-clamp-1">${escapeHtml(a.title)}</a>
+          <div class="flex gap-2 mt-1 items-center">
+            <span class="text-xs text-gray-500">${escapeHtml(a.source)}</span>
+            <span class="text-xs text-gray-600">${timeAgo(a.publishedAt)}</span>
+          </div>
+        </div>
+      `).join('') || '<p class="p-5 text-sm text-gray-500">No articles yet</p>';
+
+      document.getElementById('dashboard-trends').innerHTML = (trends.data || []).map(t => `
+        <div class="px-5 py-3 hover:bg-gray-800/50 transition flex items-center justify-between">
+          <div>
+            <p class="text-sm font-medium text-gray-200">${escapeHtml(t.topic)}</p>
+            <div class="flex gap-2 mt-1">${categoryBadge(t.category)}<span class="text-xs text-gray-500">${t.mentionCount} mentions</span></div>
+          </div>
+          <div class="text-right">
+            <p class="text-lg font-bold text-brand-400">${Number(t.trendScore).toFixed(0)}</p>
+            <p class="text-xs text-gray-500">score</p>
+          </div>
+        </div>
+      `).join('') || '<p class="p-5 text-sm text-gray-500">No trends yet</p>';
+    }
+
+    // ─── News ──────────────────────────────────────────
+    async function loadNews() {
+      const source = document.getElementById('news-source').value;
+      const category = document.getElementById('news-category').value;
+      let url = `/api/news?page=${newsPage}&limit=20`;
+      if (source) url += `&source=${encodeURIComponent(source)}`;
+      if (category) url += `&category=${encodeURIComponent(category)}`;
+
+      const res = await api(url);
+      const p = res.pagination;
+
+      document.getElementById('news-table').innerHTML = (res.data || []).map(a => `
+        <tr class="hover:bg-gray-800/30 transition cursor-pointer" onclick="openArticle(${a.id})">
+          <td class="px-4 py-3"><span class="text-gray-200 hover:text-brand-400 line-clamp-1">${escapeHtml(a.title)}</span></td>
+          <td class="px-4 py-3 text-xs text-gray-500">${escapeHtml(a.source)}</td>
+          <td class="px-4 py-3">${categoryBadge(a.category)}</td>
+          <td class="px-4 py-3">${sentimentBadge(a.sentiment)}</td>
+          <td class="px-4 py-3 text-xs text-gray-500">${timeAgo(a.publishedAt)}</td>
+        </tr>
+      `).join('') || '<tr><td colspan="5" class="px-4 py-8 text-center text-gray-500">No articles found</td></tr>';
+
+      document.getElementById('news-info').textContent = p ? `Page ${p.page} of ${p.totalPages} (${p.total} total)` : '';
+    }
+
+    // ─── Trends ────────────────────────────────────────
+    async function loadTrends() {
+      const res = await api('/api/trends?limit=50');
+      const maxScore = Math.max(...(res.data || []).map(t => Number(t.trendScore)), 1);
+
+      document.getElementById('trends-grid').innerHTML = (res.data || []).map(t => {
+        const pct = Math.round((Number(t.trendScore) / maxScore) * 100);
+        return `
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 hover:border-brand-600 transition">
+          <div class="flex items-start justify-between mb-3">
+            <h4 class="font-semibold text-white text-sm">${escapeHtml(t.topic)}</h4>
+            <span class="text-xl font-bold text-brand-400">${Number(t.trendScore).toFixed(0)}</span>
+          </div>
+          <div class="w-full bg-gray-800 rounded-full h-1.5 mb-3">
+            <div class="bg-brand-500 h-1.5 rounded-full transition-all" style="width: ${pct}%"></div>
+          </div>
+          <div class="flex items-center justify-between">
+            ${categoryBadge(t.category)}
+            <span class="text-xs text-gray-500">${t.mentionCount} mentions</span>
+          </div>
+        </div>
+      `}).join('') || '<p class="text-gray-500 col-span-3 text-center py-12">No trends detected yet</p>';
+    }
+
+    // ─── Questions ─────────────────────────────────────
+    async function loadQuestions() {
+      const status = document.getElementById('q-status').value;
+      let url = `/api/questions?page=${qPage}&limit=15`;
+      if (status) url += `&status=${status}`;
+
+      const res = await api(url);
+      const p = res.pagination;
+
+      document.getElementById('questions-list').innerHTML = (res.data || []).map(q => `
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 hover:border-brand-600 transition">
+          <div class="flex items-start justify-between gap-4">
+            <div class="flex-1">
+              <h4 class="font-semibold text-white">${escapeHtml(q.question)}</h4>
+              <p class="text-sm text-gray-400 mt-1 line-clamp-2">${escapeHtml(q.description || '')}</p>
+              <div class="flex flex-wrap gap-2 mt-3">
+                ${statusBadge(q.status)}
+                ${categoryBadge(q.category)}
+                ${q.resolutionDate ? `<span class="badge bg-gray-800 text-gray-400">Resolves: ${new Date(q.resolutionDate).toLocaleDateString()}</span>` : ''}
+                ${q.aiModel ? `<span class="badge bg-gray-800 text-gray-500">${escapeHtml(q.aiModel)}</span>` : ''}
+              </div>
+            </div>
+            <div class="text-right shrink-0">
+              ${q.confidenceScore ? `<p class="text-2xl font-bold text-brand-400">${(Number(q.confidenceScore) * 100).toFixed(0)}%</p><p class="text-xs text-gray-500">confidence</p>` : ''}
+            </div>
+          </div>
+        </div>
+      `).join('') || '<p class="text-gray-500 text-center py-12">No questions generated yet</p>';
+
+      document.getElementById('q-info').textContent = p ? `Page ${p.page} of ${p.totalPages} (${p.total} total)` : '';
+    }
+
+    // ─── Article Detail ───────────────────────────────
+    async function openArticle(id) {
+      const res = await api(`/api/news/${id}`);
+      const a = res.data;
+      if (!a) return;
+
+      document.getElementById('article-modal-content').innerHTML = `
+        <h2 class="text-xl font-bold text-white leading-tight">${escapeHtml(a.title)}</h2>
+        <div class="flex flex-wrap gap-2 mt-3">
+          ${categoryBadge(a.category)}
+          ${sentimentBadge(a.sentiment)}
+          ${a.sentimentScore ? `<span class="badge bg-gray-800 text-gray-400">Score: ${Number(a.sentimentScore).toFixed(2)}</span>` : ''}
+          <span class="badge bg-gray-800 text-gray-400">${escapeHtml(a.source)}</span>
+        </div>
+        <div class="mt-4 flex gap-4 text-xs text-gray-500">
+          ${a.publishedAt ? `<span>Published: ${new Date(a.publishedAt).toLocaleString()}</span>` : ''}
+          <span>Scraped: ${new Date(a.scrapedAt).toLocaleString()}</span>
+        </div>
+        <hr class="border-gray-800 my-4" />
+        ${a.description ? `<div class="mb-4"><h4 class="text-xs font-semibold text-gray-500 uppercase mb-2">Description</h4><p class="text-sm text-gray-300 leading-relaxed">${escapeHtml(a.description)}</p></div>` : ''}
+        ${a.content ? `<div class="mb-4"><h4 class="text-xs font-semibold text-gray-500 uppercase mb-2">Content</h4><p class="text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">${escapeHtml(a.content)}</p></div>` : '<p class="text-sm text-gray-500 italic">No full content available for this article.</p>'}
+        <hr class="border-gray-800 my-4" />
+        <a href="${escapeHtml(a.url)}" target="_blank" class="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-lg transition">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+          Open Original Article
+        </a>
+      `;
+      document.getElementById('article-modal').classList.remove('hidden');
+    }
+
+    function closeArticleModal() {
+      document.getElementById('article-modal').classList.add('hidden');
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeArticleModal();
+    });
+
+    // ─── Actions ───────────────────────────────────────
+    async function triggerScrape() {
+      showToast('Scraping...', 'info');
+      await fetch(`${API}/api/scrape/trigger`, { method: 'POST' });
+      showToast('Scrape job triggered!', 'success');
+    }
+
+    async function triggerGenerate() {
+      showToast('Generating questions...', 'info');
+      const res = await fetch(`${API}/api/questions/generate`, { method: 'POST' });
+      const data = await res.json();
+      showToast(data.message || 'Done!', 'success');
+      if (document.getElementById('page-questions').classList.contains('hidden') === false) loadQuestions();
+    }
+
+    // ─── WebSocket ─────────────────────────────────────
+    let ws;
+    function connectWs() {
+      ws = new WebSocket(`ws://${location.host}/ws`);
+      ws.onopen = () => {
+        document.getElementById('ws-status').textContent = 'Connected';
+        document.getElementById('ws-dot').className = 'live-dot inline-block w-2 h-2 rounded-full bg-green-500 mr-1';
+      };
+      ws.onclose = () => {
+        document.getElementById('ws-status').textContent = 'Disconnected';
+        document.getElementById('ws-dot').className = 'inline-block w-2 h-2 rounded-full bg-red-500 mr-1';
+        setTimeout(connectWs, 3000);
+      };
+      ws.onerror = () => {};
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          addLiveLog(msg);
+
+          // Auto-refresh on events
+          if (msg.event === 'news:new') loadDashboard();
+          if (msg.event === 'trend:update') loadDashboard();
+          if (msg.event === 'question:new') loadDashboard();
+        } catch {}
+      };
+    }
+
+    function addLiveLog(msg) {
+      const log = document.getElementById('live-log');
+      const colors = { 'news:new': 'text-blue-400', 'trend:update': 'text-yellow-400', 'question:new': 'text-emerald-400', 'connected': 'text-gray-500' };
+      const time = new Date().toLocaleTimeString();
+      const el = document.createElement('div');
+      el.className = `${colors[msg.event] || 'text-gray-400'}`;
+      el.textContent = `[${time}] ${msg.event}: ${JSON.stringify(msg.data)}`;
+      log.prepend(el);
+    }
+
+    // ─── Toast ─────────────────────────────────────────
+    function showToast(msg, type = 'info') {
+      const icons = {
+        success: '<svg class="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/></svg>',
+        info: '<svg class="w-5 h-5 text-blue-400 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>',
+        error: '<svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"/></svg>',
+      };
+      document.getElementById('toast-icon').innerHTML = icons[type] || icons.info;
+      document.getElementById('toast-msg').textContent = msg;
+      document.getElementById('toast').classList.remove('hidden');
+      setTimeout(() => document.getElementById('toast').classList.add('hidden'), 3000);
+    }
+
+    // ─── XSS Protection ───────────────────────────────
+    function escapeHtml(str) {
+      if (!str) return '';
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    // ─── Init ──────────────────────────────────────────
+    switchTab('dashboard');
+    connectWs();
+  </script>
+</body>
+
+</html>

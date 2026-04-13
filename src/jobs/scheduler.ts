@@ -2,13 +2,14 @@ import cron from "node-cron";
 import { config } from "../config";
 import { scrapeRssFeeds, saveArticles } from "../scrapers/rss";
 import { scrapeNewsApi } from "../scrapers/newsapi";
+import { scrapeArticleContent } from "../scrapers/content";
 import { deduplicateArticles, cleanText } from "../processors/cleaner";
 import { detectTrends } from "../ai/trend";
 import { analyzeSentiment } from "../ai/sentiment";
 import { generateQuestions } from "../ai/question-generator";
 import { db } from "../db";
 import { articles, trends, generatedQuestions } from "../db/schema";
-import { desc, gte } from "drizzle-orm";
+import { desc, gte, eq, isNull, or, like, sql } from "drizzle-orm";
 import { broadcastEvent } from "../ws/handler";
 
 async function runScrapeJob() {
@@ -37,7 +38,10 @@ async function runScrapeJob() {
     broadcastEvent("news:new", { count: savedCount });
   }
 
-  // 4. AI Processing (only if we have OpenAI key)
+  // 4. Enrich articles with full content (scrape truncated ones)
+  await enrichTruncatedArticles();
+
+  // 5. AI Processing (only if we have OpenAI key)
   if (config.openai.apiKey) {
     try {
       // Get recent article titles for AI analysis
@@ -95,6 +99,59 @@ async function runScrapeJob() {
   }
 
   console.log(`[Scheduler] Job completed at ${new Date().toISOString()}\n`);
+}
+
+/**
+ * Find articles with truncated/missing content and scrape full content from source URL.
+ * Processes up to 10 articles per run to avoid overloading.
+ */
+async function enrichTruncatedArticles() {
+  const truncated = await db
+    .select({ id: articles.id, url: articles.url, content: articles.content })
+    .from(articles)
+    .where(
+      or(
+        isNull(articles.content),
+        like(articles.content, "%[+%chars]%")
+      )
+    )
+    .orderBy(desc(articles.scrapedAt))
+    .limit(15);
+
+  // Also find articles with very short content (< 300 chars = likely snippet)
+  const shortContent = await db
+    .select({ id: articles.id, url: articles.url, content: articles.content })
+    .from(articles)
+    .where(sql`LENGTH(${articles.content}) < 300 AND ${articles.content} IS NOT NULL`)
+    .orderBy(desc(articles.scrapedAt))
+    .limit(10);
+
+  const toEnrich = [...truncated, ...shortContent];
+  // Deduplicate by id
+  const seen = new Set<number>();
+  const unique = toEnrich.filter((a) => {
+    if (seen.has(a.id)) return false;
+    seen.add(a.id);
+    return true;
+  });
+
+  if (unique.length === 0) return;
+
+  console.log(`[Enricher] Enriching ${unique.length} articles with full content...`);
+  let enriched = 0;
+
+  for (const article of unique) {
+    const fullContent = await scrapeArticleContent(article.url);
+    if (fullContent && fullContent.length > (article.content?.length ?? 0)) {
+      await db
+        .update(articles)
+        .set({ content: fullContent })
+        .where(eq(articles.id, article.id));
+      enriched++;
+    }
+  }
+
+  console.log(`[Enricher] Enriched ${enriched}/${unique.length} articles`);
 }
 
 export function startScheduler() {

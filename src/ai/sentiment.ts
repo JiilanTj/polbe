@@ -32,13 +32,14 @@ Return one result per headline in the same order. Return ONLY valid JSON, no mar
     temperature: 0.1,
   });
 
-  const content = response.choices[0]?.message?.content;
-  if (!content) return [];
+  const raw = response.choices[0]?.message?.content;
+  if (!raw) return [];
 
   try {
+    const content = raw.replace(/```(?:json)?\s*/g, "").replace(/```/g, "").trim();
     return JSON.parse(content) as SentimentResult[];
   } catch {
-    console.error("[Sentiment] Failed to parse AI response:", content);
+    console.error("[Sentiment] Failed to parse AI response:", raw);
     return [];
   }
 }

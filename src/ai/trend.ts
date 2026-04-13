@@ -33,13 +33,14 @@ Focus on topics that could become prediction market questions. Return max 10 tre
     temperature: 0.3,
   });
 
-  const content = response.choices[0]?.message?.content;
-  if (!content) return [];
+  const raw = response.choices[0]?.message?.content;
+  if (!raw) return [];
 
   try {
+    const content = raw.replace(/```(?:json)?\s*/g, "").replace(/```/g, "").trim();
     return JSON.parse(content) as TrendResult[];
   } catch {
-    console.error("[Trend] Failed to parse AI response:", content);
+    console.error("[Trend] Failed to parse AI response:", raw);
     return [];
   }
 }
