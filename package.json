@@ -1,0 +1,37 @@
+{
+  "name": "polymarketbackend",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun run --watch index.ts",
+    "start": "bun run index.ts",
+    "db:generate": "bunx drizzle-kit generate",
+    "db:push": "bunx drizzle-kit push",
+    "db:migrate": "bunx drizzle-kit migrate",
+    "db:studio": "bunx drizzle-kit studio",
+    "db:drop": "bunx drizzle-kit drop",
+    "db:seed": "bun run src/db/seed.ts",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "setup": "docker compose up -d && bun install && bunx drizzle-kit push"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node-cron": "^3.0.11",
+    "drizzle-kit": "^0.31.10"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.12.12",
+    "node-cron": "^4.2.1",
+    "openai": "^6.34.0",
+    "postgres": "^3.4.9",
+    "rss-parser": "^3.13.0"
+  }
+}
