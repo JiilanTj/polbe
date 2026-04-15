@@ -8,6 +8,13 @@
       "when": 1776095436440,
       "tag": "0000_wealthy_mongoose",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1776233833485,
+      "tag": "0001_solid_tiger_shark",
+      "breakpoints": true
     }
   ]
 }

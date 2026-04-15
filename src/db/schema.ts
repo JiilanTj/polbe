@@ -1,4 +1,17 @@
-import { pgTable, serial, text, varchar, timestamp, decimal, integer } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, varchar, timestamp, decimal, integer, pgEnum, boolean } from "drizzle-orm/pg-core";
+
+export const roleEnum = pgEnum("user_role", ["user", "admin", "platform"]);
+
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  email: varchar("email", { length: 255 }).notNull().unique(),
+  username: varchar("username", { length: 100 }).notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  role: roleEnum("role").default("user").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
 
 export const articles = pgTable("articles", {
   id: serial("id").primaryKey(),

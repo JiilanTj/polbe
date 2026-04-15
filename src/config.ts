@@ -2,6 +2,15 @@ export const config = {
   database: {
     url: process.env.DATABASE_URL || "postgresql://postgres:postgres@localhost:5432/polymarket",
   },
+  redis: {
+    url: process.env.REDIS_URL || "redis://:redis123@localhost:6379",
+  },
+  jwt: {
+    accessSecret: process.env.JWT_ACCESS_SECRET || "change-me-access-secret-min-32chars!!",
+    refreshSecret: process.env.JWT_REFRESH_SECRET || "change-me-refresh-secret-min-32chars!",
+    accessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || "15m",
+    refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "7d",
+  },
   newsapi: {
     key: process.env.NEWSAPI_KEY || "",
     baseUrl: "https://newsapi.org/v2",
