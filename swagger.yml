@@ -375,8 +375,8 @@ paths:
   /api/questions:
     get:
       tags: [Questions]
-      summary: List generated questions
-      description: Returns paginated list of AI-generated Polymarket-style prediction questions.
+      summary: List questions
+      description: Returns paginated list of Polymarket-style prediction questions (AI-generated + manual).
       parameters:
         - name: page
           in: query
@@ -397,8 +397,19 @@ paths:
           in: query
           schema:
             type: string
-            enum: [draft, published, resolved]
-          description: Filter by question status
+            enum: [draft, pending, active, resolved, closed]
+          description: Filter by status
+        - name: category
+          in: query
+          schema:
+            type: string
+          description: Filter by category
+        - name: marketType
+          in: query
+          schema:
+            type: string
+            enum: [binary, categorical, scalar]
+          description: Filter by market type
       responses:
         "200":
           description: Paginated list of questions
@@ -413,6 +424,69 @@ paths:
                       $ref: "#/components/schemas/GeneratedQuestion"
                   pagination:
                     $ref: "#/components/schemas/Pagination"
+
+    post:
+      tags: [Questions]
+      summary: Create question manually
+      description: |
+        Buat prediction market question secara manual (Polymarket-style).
+        Memerlukan role **admin** atau **platform**.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateQuestionBody"
+            example:
+              question: "Apakah Bitcoin akan melebihi $150k sebelum akhir 2026?"
+              description: "Market resolves YES jika harga BTC >= $150,000 pada tanggal resolusi berdasarkan Coinbase spot price."
+              category: "crypto"
+              tags: ["bitcoin", "crypto", "price"]
+              marketType: "binary"
+              outcomes: ["Yes", "No"]
+              resolutionDate: "2026-12-31T00:00:00Z"
+              startDate: "2026-04-16T00:00:00Z"
+              resolutionSource: "https://www.coinbase.com/price/bitcoin"
+              resolutionCriteria: "Resolves YES jika harga BTC >= $150,000 pada tanggal resolusi."
+              initialLiquidity: 1000
+              minTradeSize: 1
+              status: "draft"
+      responses:
+        "201":
+          description: Question berhasil dibuat
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/GeneratedQuestion"
+        "400":
+          description: Request body bukan JSON valid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Tidak ada access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Role tidak memiliki akses (butuh admin/platform)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /api/questions/{id}:
     get:
@@ -445,10 +519,13 @@ paths:
   /api/questions/generate:
     post:
       tags: [Questions]
-      summary: Manually generate questions
+      summary: Generate questions via AI
       description: |
-        Triggers AI question generation based on the 30 most recent scraped articles.
-        Uses OpenAI to create Polymarket-style YES/NO prediction questions.
+        Trigger AI question generation berdasarkan 30 artikel terbaru yang di-scrape.
+        Menggunakan OpenAI untuk membuat Polymarket-style binary YES/NO questions.
+        Memerlukan role **admin** atau **platform**.
+      security:
+        - bearerAuth: []
       responses:
         "200":
           description: Questions generated successfully
@@ -464,6 +541,18 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/GeneratedQuestionAI"
+        "401":
+          description: Tidak ada access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Role tidak memiliki akses
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   # ─── Scrape ────────────────────────────────────────────
   /api/scrape/trigger:
@@ -566,37 +655,173 @@ components:
         question:
           type: string
           example: "Will Trump impose new tariffs on China before July 2026?"
+        slug:
+          type: string
+          example: "will-trump-impose-new-tariffs-on-china-before-july-2026-1713196800000"
         description:
           type: string
           nullable: true
-          example: "Based on recent trade tensions, this question asks whether..."
+          example: "Resolves YES jika tarif resmi diumumkan sebelum 1 Juli 2026."
         category:
           type: string
           nullable: true
+          example: "politics"
+        tags:
+          type: array
+          nullable: true
+          items:
+            type: string
+          example: ["tariff", "trade", "china"]
+        imageUrl:
+          type: string
+          format: uri
+          nullable: true
+        marketType:
+          type: string
+          enum: [binary, categorical, scalar]
+          example: "binary"
+        outcomes:
+          type: array
+          nullable: true
+          items:
+            type: string
+          example: ["Yes", "No"]
+        initialLiquidity:
+          type: number
+          nullable: true
+          example: 1000
+        minTradeSize:
+          type: number
+          nullable: true
+          example: 1
+        volume:
+          type: number
+          example: 0
+        startDate:
+          type: string
+          format: date-time
+          nullable: true
+        resolutionDate:
+          type: string
+          format: date-time
+          nullable: true
+        resolutionSource:
+          type: string
+          nullable: true
+          example: "https://www.coinbase.com/price/bitcoin"
+        resolutionCriteria:
+          type: string
+          nullable: true
+          example: "Resolves YES jika harga BTC >= $150,000 pada tanggal resolusi."
+        resolvedOutcome:
+          type: string
+          nullable: true
+          description: Diisi saat status = resolved
+        status:
+          type: string
+          enum: [draft, pending, active, resolved, closed]
+          example: "draft"
+        createdBy:
+          type: integer
+          nullable: true
+          description: ID user yang membuat (null jika AI-generated)
         sourceArticleIds:
           type: array
           nullable: true
           items:
             type: integer
-        resolutionDate:
-          type: string
-          format: date-time
-          nullable: true
-        createdAt:
-          type: string
-          format: date-time
+          description: Diisi saat question di-generate oleh AI
         aiModel:
           type: string
           nullable: true
           example: "gpt-4o"
+          description: Null jika dibuat manual
         confidenceScore:
           type: number
           nullable: true
           example: 0.85
+          description: Null jika dibuat manual
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateQuestionBody:
+      type: object
+      required: [question, resolutionDate]
+      properties:
+        question:
+          type: string
+          description: Teks prediction question (wajib)
+          example: "Apakah Bitcoin akan melebihi $150k sebelum akhir 2026?"
+        description:
+          type: string
+          description: Detail konteks dan kriteria resolusi
+        category:
+          type: string
+          example: "crypto"
+        tags:
+          type: array
+          items:
+            type: string
+          example: ["bitcoin", "crypto"]
+        imageUrl:
+          type: string
+          format: uri
+          description: URL gambar market
+        marketType:
+          type: string
+          enum: [binary, categorical, scalar]
+          default: binary
+          description: Tipe market
+        outcomes:
+          type: array
+          items:
+            type: string
+          description: |
+            Outcome options. Default ["Yes","No"] untuk binary.
+            Minimal 2 untuk binary/categorical.
+          example: ["Yes", "No"]
+        initialLiquidity:
+          type: number
+          minimum: 0
+          description: Modal awal market
+          example: 1000
+        minTradeSize:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          description: Minimum ukuran trade
+          example: 1
+        startDate:
+          type: string
+          format: date-time
+          description: Kapan trading mulai (harus sebelum resolutionDate)
+          example: "2026-04-16T00:00:00Z"
+        resolutionDate:
+          type: string
+          format: date-time
+          description: Kapan market resolved (wajib)
+          example: "2026-12-31T00:00:00Z"
+        resolutionSource:
+          type: string
+          description: URL atau sumber data untuk resolusi
+          example: "https://www.coinbase.com/price/bitcoin"
+        resolutionCriteria:
+          type: string
+          description: Kriteria YES/NO yang jelas dan tidak ambigu
+          example: "Resolves YES jika harga BTC >= $150,000."
+        sourceArticleIds:
+          type: array
+          items:
+            type: integer
+          description: ID artikel yang jadi referensi (opsional)
         status:
           type: string
-          enum: [draft, published, resolved]
-          example: "draft"
+          enum: [draft, pending, active, resolved, closed]
+          default: draft
 
     GeneratedQuestionAI:
       type: object

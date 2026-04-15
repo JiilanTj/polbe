@@ -37,15 +37,44 @@ export const trends = pgTable("trends", {
   trendScore: decimal("trend_score").default("0"),
 });
 
+export const marketTypeEnum = pgEnum("market_type", ["binary", "categorical", "scalar"]);
+export const questionStatusEnum = pgEnum("question_status", ["draft", "pending", "active", "resolved", "closed"]);
+
 export const generatedQuestions = pgTable("generated_questions", {
   id: serial("id").primaryKey(),
+
+  // ─── Core ────────────────────────────────────────────────────────
   question: text("question").notNull(),
+  slug: varchar("slug", { length: 300 }).unique(),
   description: text("description"),
-  category: varchar("category", { length: 50 }),
-  sourceArticleIds: integer("source_article_ids").array(),
+  category: varchar("category", { length: 100 }),
+  tags: text("tags").array(),
+  imageUrl: text("image_url"),
+
+  // ─── Market Mechanics ────────────────────────────────────────────
+  marketType: marketTypeEnum("market_type").default("binary").notNull(),
+  outcomes: text("outcomes").array(),           // ["Yes","No"] for binary; custom for categorical
+  initialLiquidity: decimal("initial_liquidity"),
+  minTradeSize: decimal("min_trade_size"),
+  volume: decimal("volume").default("0").notNull(),
+
+  // ─── Resolution ──────────────────────────────────────────────────
+  startDate: timestamp("start_date"),
   resolutionDate: timestamp("resolution_date"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  resolutionSource: text("resolution_source"), // URL/source used to resolve
+  resolutionCriteria: text("resolution_criteria"), // explicit YES/NO criteria
+  resolvedOutcome: text("resolved_outcome"),   // filled when status = resolved
+
+  // ─── Status & Ownership ──────────────────────────────────────────
+  status: questionStatusEnum("status").default("draft").notNull(),
+  createdBy: integer("created_by").references(() => users.id),
+
+  // ─── AI Metadata (null for manually created) ─────────────────────
+  sourceArticleIds: integer("source_article_ids").array(),
   aiModel: varchar("ai_model", { length: 50 }),
   confidenceScore: decimal("confidence_score"),
-  status: varchar("status", { length: 20 }).default("draft").notNull(),
+
+  // ─── Timestamps ───────────────────────────────────────────────────
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
