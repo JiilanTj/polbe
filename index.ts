@@ -13,9 +13,12 @@ import { ensureBucket } from "./src/lib/minio";
 const app = new Hono();
 
 app.use("*", cors({
-  origin: config.cors.origin.length === 1 && config.cors.origin[0] === "*"
-    ? "*"
-    : config.cors.origin,
+  origin: (origin) => {
+    // Jika CORS_ORIGIN = "*", izinkan semua origin tapi reflect origin-nya (diperlukan saat credentials: true)
+    const allowed = config.cors.origin;
+    if (allowed.length === 1 && allowed[0] === "*") return origin || "*";
+    return allowed.includes(origin) ? origin : allowed[0];
+  },
   allowHeaders: ["Content-Type", "Authorization"],
   allowMethods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
   exposeHeaders: ["X-RateLimit-Limit", "X-RateLimit-Remaining", "Retry-After"],

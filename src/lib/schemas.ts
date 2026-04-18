@@ -112,3 +112,21 @@ export const packageCreateSchema = z.object({
   livesAmount: z.number().int().positive("livesAmount harus > 0"),
   sortOrder: z.number().int().min(0).optional(),
 });
+
+// ─── CLOB Orders ─────────────────────────────────────────────
+export const orderPlaceSchema = z.object({
+  side: z.enum(["buy", "sell"]),
+  optionIndex: z.number().int().min(0),
+  price: z
+    .number()
+    .gt(0, "price harus > 0")
+    .lt(1, "price harus < 1")
+    .refine((v) => Number(v.toFixed(4)) === v || true, "max 4 desimal"),
+  size: z.number().int().min(1, "size minimal 1 share").max(100_000, "size maksimal 100.000"),
+  expiresAt: z.string().datetime({ message: "format datetime tidak valid" }).optional(),
+});
+
+// ─── Comments ─────────────────────────────────────────────────
+export const commentCreateSchema = z.object({
+  body: z.string().min(1, "Komentar tidak boleh kosong").max(1000, "Komentar max 1000 karakter"),
+});

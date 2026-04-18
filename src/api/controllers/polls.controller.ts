@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import { db } from "../../db";
-import { polls, pollVotes, users, livesTransactions } from "../../db/schema";
-import { eq, desc, sql, and, ilike } from "drizzle-orm";
+import { polls, pollVotes, users, livesTransactions, positions, orders, trades } from "../../db/schema";
+import { eq, desc, sql, and, ilike, gt, or } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { verifyAccessToken } from "../../lib/jwt";
 import { broadcastEvent } from "../../ws/handler";
@@ -80,7 +80,7 @@ export const pollsController = {
     return c.json({ data: rows });
   },
 
-  // GET /api/polls/:id — detail poll + distribusi suara + userVote (optional auth)
+  // GET /api/polls/:id — detail poll + distribusi positions + orderbook + last prices (optional auth)
   async getById(c: Context) {
     const id = safeInt(c.req.param("id"));
     if (!id) return c.json({ error: "ID poll tidak valid" }, 400);
@@ -88,47 +88,111 @@ export const pollsController = {
     const [poll] = await db.select().from(polls).where(eq(polls.id, id));
     if (!poll) return c.json({ error: "Poll tidak ditemukan" }, 404);
 
-    // Hitung distribusi suara per opsi
-    const voteCounts = await db
+    // Distribusi posisi per opsi (CLOB-based — siapa pegang berapa shares)
+    const positionStats = await db
       .select({
-        optionIndex: pollVotes.optionIndex,
-        count: sql<number>`count(*)`,
-        totalLives: sql<number>`sum(${pollVotes.livesWagered})`,
+        optionIndex: positions.optionIndex,
+        holders: sql<number>`count(*)`,
+        totalShares: sql<number>`sum(${positions.shares})`,
       })
-      .from(pollVotes)
-      .where(eq(pollVotes.pollId, id))
-      .groupBy(pollVotes.optionIndex);
+      .from(positions)
+      .where(and(eq(positions.pollId, id), gt(positions.shares, 0)))
+      .groupBy(positions.optionIndex);
+
+    // Best bid/ask per option dari order book
+    const bids = await db
+      .select({
+        optionIndex: orders.optionIndex,
+        bestBid: sql<string>`max(${orders.price})`,
+      })
+      .from(orders)
+      .where(and(
+        eq(orders.pollId, id),
+        eq(orders.side, "buy"),
+        sql`${orders.status} IN ('open','partial')`,
+      ))
+      .groupBy(orders.optionIndex);
+
+    const asks = await db
+      .select({
+        optionIndex: orders.optionIndex,
+        bestAsk: sql<string>`min(${orders.price})`,
+      })
+      .from(orders)
+      .where(and(
+        eq(orders.pollId, id),
+        eq(orders.side, "sell"),
+        sql`${orders.status} IN ('open','partial')`,
+      ))
+      .groupBy(orders.optionIndex);
+
+    const lastPrices = (poll.lastPrices as Record<string, string>) || {};
 
     const distribution = (poll.options ?? []).map((opt: string, idx: number) => {
-      const stats = voteCounts.find((v) => v.optionIndex === idx);
+      const posStats = positionStats.find((p) => p.optionIndex === idx);
+      const bid = bids.find((b) => b.optionIndex === idx);
+      const ask = asks.find((a) => a.optionIndex === idx);
+      const lastPrice = lastPrices[String(idx)] ?? null;
+      const midPrice = bid?.bestBid && ask?.bestAsk
+        ? ((Number(bid.bestBid) + Number(ask.bestAsk)) / 2).toFixed(4) : null;
       return {
         index: idx,
         label: opt,
-        votes: Number(stats?.count ?? 0),
-        totalLives: Number(stats?.totalLives ?? 0),
+        totalShares: Number(posStats?.totalShares ?? 0),
+        holders: Number(posStats?.holders ?? 0),
+        bestBid: bid?.bestBid ?? null,
+        bestAsk: ask?.bestAsk ?? null,
+        midPrice,
+        lastPrice,
       };
     });
 
-    const totalVotes = distribution.reduce((s, d) => s + d.votes, 0);
-
-    // Embed userVote jika request ada Authorization header (optional auth)
-    let userVote = null;
+    // userVote/userPosition jika ada header auth (optional)
+    let userPosition = null;
     const authHeader = c.req.header("Authorization");
     if (authHeader?.startsWith("Bearer ")) {
       try {
         const payload = await verifyAccessToken(authHeader.slice(7));
         const viewerId = Number(payload.sub);
-        const [vote] = await db
+        userPosition = await db
           .select()
-          .from(pollVotes)
-          .where(and(eq(pollVotes.pollId, id), eq(pollVotes.userId, viewerId)));
-        userVote = vote ?? null;
+          .from(positions)
+          .where(and(eq(positions.pollId, id), eq(positions.userId, viewerId)));
       } catch {
-        // Token tidak valid — abaikan, userVote tetap null
+        // Token tidak valid — abaikan
       }
     }
 
-    return c.json({ data: { ...poll, distribution, totalVotes, userVote } });
+    // ── Market Stats (Polymarket-style) ────────────────────────────────────
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const [volume24hRow] = await db
+      .select({ vol: sql<number>`COALESCE(SUM(${trades.livesTransferred}), 0)` })
+      .from(trades)
+      .where(and(eq(trades.pollId, id), gt(trades.createdAt, oneDayAgo)));
+
+    const [openInterestRow] = await db
+      .select({ oi: sql<number>`COALESCE(SUM((${orders.size} - ${orders.filledSize}) * ${orders.price}::numeric), 0)` })
+      .from(orders)
+      .where(and(
+        eq(orders.pollId, id),
+        or(eq(orders.status, "open"), eq(orders.status, "partial")),
+      ));
+
+    const [uniqueTradersRow] = await db
+      .select({ count: sql<number>`COUNT(DISTINCT maker_user_id) + COUNT(DISTINCT taker_user_id)` })
+      .from(trades)
+      .where(eq(trades.pollId, id));
+
+    const stats = {
+      totalVolume: poll.totalVolume,
+      volume24h: Number(volume24hRow?.vol ?? 0),
+      openInterest: Math.round(Number(openInterestRow?.oi ?? 0)),
+      uniqueTraders: Number(uniqueTradersRow?.count ?? 0),
+      prizePool: poll.prizePool,
+    };
+
+    return c.json({ data: { ...poll, distribution, userPosition, stats } });
   },
 
   // POST /api/polls — admin/platform buat poll
@@ -194,6 +258,16 @@ export const pollsController = {
 
     // Broadcast ke semua subscriber saat poll diaktifkan
     if (status === "active" && updated) {
+      // Seed lastPrices ke 0.5000 untuk semua opsi jika belum ada harga
+      if (!updated.lastPrices) {
+        const options = (updated.options ?? []) as string[];
+        const seedPrices: Record<string, string> = {};
+        options.forEach((_: string, idx: number) => { seedPrices[String(idx)] = "0.5000"; });
+        await db.update(polls)
+          .set({ lastPrices: seedPrices })
+          .where(eq(polls.id, id));
+      }
+
       broadcastEvent("poll:activated", {
         pollId: id,
         title: updated.title,
@@ -295,7 +369,7 @@ export const pollsController = {
     }, 201);
   },
 
-  // PATCH /api/polls/:id/resolve — admin tentukan pemenang + distribusi payout
+  // PATCH /api/polls/:id/resolve — admin tentukan pemenang + distribusi payout (CLOB-based)
   async resolve(c: Context) {
     const me = c.get("user") as TokenPayload;
     const pollId = safeInt(c.req.param("id"));
@@ -314,103 +388,89 @@ export const pollsController = {
       return c.json({ error: `winnerOptionIndex tidak valid (0–${(poll.options?.length ?? 1) - 1})` }, 422);
     }
 
-    // Ambil semua votes
-    const allVotes = await db.select().from(pollVotes).where(eq(pollVotes.pollId, pollId));
-    if (allVotes.length === 0) {
-      // Tidak ada voter — langsung tutup
-      await db
-        .update(polls)
+    // Batalkan semua open/partial orders yang masih ada
+    await db.update(orders)
+      .set({ status: "cancelled", updatedAt: new Date() })
+      .where(and(eq(orders.pollId, pollId), sql`${orders.status} IN ('open','partial')`));
+
+    // Ambil semua posisi winning option yang masih ada (shares > 0)
+    const winnerPositions = await db
+      .select()
+      .from(positions)
+      .where(and(
+        eq(positions.pollId, pollId),
+        eq(positions.optionIndex, winnerOptionIndex),
+        gt(positions.shares, 0),
+      ));
+
+    const totalWinningShares = winnerPositions.reduce((s, p) => s + p.shares, 0);
+    const prizePool = poll.prizePool;
+
+    if (totalWinningShares === 0) {
+      // Tidak ada posisi — resolve tanpa payout
+      await db.update(polls)
         .set({ status: "resolved", winnerOptionIndex, resolvedAt: new Date(), resolvedBy: Number(me.sub), updatedAt: new Date() })
         .where(eq(polls.id, pollId));
-      return c.json({ message: "Poll resolved (tidak ada voter)" });
+      return c.json({ message: "Poll resolved (tidak ada posisi winning)" });
     }
 
-    const winnerVotes = allVotes.filter((v) => v.optionIndex === winnerOptionIndex);
-    const loserVotes = allVotes.filter((v) => v.optionIndex !== winnerOptionIndex);
+    // Payout per share: min(1, prizePool / totalWinningShares) — capped 1 per share
+    const payoutPerShare = Math.min(1.0, prizePool / totalWinningShares);
+    let totalPaid = 0;
 
-    const totalLoserLives = loserVotes.reduce((s, v) => s + v.livesWagered, 0);
-    const totalWinnerLives = winnerVotes.reduce((s, v) => s + v.livesWagered, 0);
-    const feePercent = Number(poll.platformFeePercent ?? 30) / 100;
-    const winnerPoolLives = totalLoserLives * (1 - feePercent); // 70% default
-
-    // ─── Payout per winning life ──────────────────────────────────
-    // Formula: extra_lives = (loser_lives × (1 - fee%)) / total_winner_lives
-    // Setiap winner dapat kembali: lives_wagered + (lives_wagered × extra_per_life)
-    const extraPerWinnerLife = totalWinnerLives > 0 ? winnerPoolLives / totalWinnerLives : 0;
-
-    // Kembalikan nyawa ke winner
-    for (const vote of winnerVotes) {
-      const payout = vote.livesWagered + Math.floor(vote.livesWagered * extraPerWinnerLife);
-      const payoutDecimal = vote.livesWagered + vote.livesWagered * extraPerWinnerLife;
+    for (const pos of winnerPositions) {
+      const payout = Math.floor(pos.shares * payoutPerShare);
+      if (payout <= 0) continue;
 
       await adjustLives(
-        vote.userId,
-        payout,
-        "vote_payout",
-        pollId,
-        "poll",
-        `Menang poll #${pollId} — ${payout} nyawa (${payoutDecimal.toFixed(2)} raw)`,
+        pos.userId, payout, "vote_payout", pollId, "poll",
+        `Menang poll #${pollId} — ${pos.shares} shares × ${payoutPerShare.toFixed(4)} = ${payout} nyawa`,
       );
-
-      await db
-        .update(pollVotes)
-        .set({ payoutLives: String(payoutDecimal.toFixed(4)) })
-        .where(eq(pollVotes.id, vote.id));
+      totalPaid += payout;
     }
 
-    // Loser tidak dapat pengembalian (nyawa sudah didebit saat vote)
-    for (const vote of loserVotes) {
-      await db
-        .update(pollVotes)
-        .set({ payoutLives: "0" })
-        .where(eq(pollVotes.id, vote.id));
-    }
+    // Sisa pool setelah payout = platform revenue
+    const platformRevenue = prizePool - totalPaid;
 
-    // Mark poll resolved
-    await db
-      .update(polls)
+    // Mark poll resolved, reset prize pool
+    await db.update(polls)
       .set({
         status: "resolved",
         winnerOptionIndex,
         resolvedAt: new Date(),
         resolvedBy: Number(me.sub),
+        prizePool: 0,
         updatedAt: new Date(),
       })
       .where(eq(polls.id, pollId));
 
     const winnerLabel = poll.options?.[winnerOptionIndex] ?? winnerOptionIndex;
-    const platformLives = Math.floor(totalLoserLives * feePercent);
 
-    // Broadcast ke semua koneksi WS — channel "polls"
     broadcastEvent("poll:resolved", {
-      pollId,
-      winnerOption: winnerLabel,
-      winnerOptionIndex,
-      totalVoters: allVotes.length,
-      winners: winnerVotes.length,
-      losers: loserVotes.length,
+      pollId, winnerOption: winnerLabel, winnerOptionIndex,
+      totalWinningShares, payoutPerShare, totalPaid, platformRevenue,
     }, "polls");
 
-    // Broadcast personal notif ke setiap winner
-    for (const vote of winnerVotes) {
-      broadcastEvent("poll:payout", {
-        pollId,
-        winnerOption: winnerLabel,
-        livesWagered: vote.livesWagered,
-      }, `user:${vote.userId}`);
+    // Notif personal ke setiap winner
+    for (const pos of winnerPositions) {
+      const payout = Math.floor(pos.shares * payoutPerShare);
+      if (payout > 0) {
+        broadcastEvent("poll:payout", {
+          pollId, winnerOption: winnerLabel, shares: pos.shares, payout,
+        }, `user:${pos.userId}`);
+      }
     }
 
     return c.json({
       message: `Poll #${pollId} resolved! Pemenang: "${winnerLabel}"`,
       summary: {
         winnerOption: winnerLabel,
-        totalVoters: allVotes.length,
-        winners: winnerVotes.length,
-        losers: loserVotes.length,
-        totalLoserLives,
-        winnerPoolLives: Math.floor(winnerPoolLives),
-        platformLives,
-        extraPerWinner: extraPerWinnerLife.toFixed(4),
+        totalWinningShares,
+        prizePool,
+        payoutPerShare: payoutPerShare.toFixed(4),
+        totalPaid,
+        platformRevenue,
+        winners: winnerPositions.length,
       },
     });
   },

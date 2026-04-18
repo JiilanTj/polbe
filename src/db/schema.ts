@@ -1,4 +1,4 @@
-import { pgTable, serial, text, varchar, timestamp, decimal, integer, pgEnum, boolean, uniqueIndex, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, varchar, timestamp, decimal, integer, pgEnum, boolean, uniqueIndex, jsonb, type AnyPgColumn } from "drizzle-orm/pg-core";
 
 export const roleEnum = pgEnum("user_role", ["user", "admin", "platform"]);
 export const topupStatusEnum = pgEnum("topup_status", ["pending", "approved", "rejected"]);
@@ -162,8 +162,12 @@ export const polls = pgTable("polls", {
   // ─── Mekanik ───────────────────────────────────────────
   livesPerVote: integer("lives_per_vote").default(1).notNull(),
   platformFeePercent: decimal("platform_fee_percent", { precision: 5, scale: 2 }).default("30").notNull(),
+  // ─── CLOB Prize Pool ────────────────────────────────────
+  prizePool: integer("prize_pool").default(0).notNull(),
+  lastPrices: jsonb("last_prices"),                      // { "0": "0.5000", "1": "0.5000" }
   // ─── Stats ─────────────────────────────────────────────
   totalVotes: integer("total_votes").default(0).notNull(),
+  totalVolume: integer("total_volume").default(0).notNull(), // total lives traded (semua trades)
   // ─── Timestamps ────────────────────────────────────────
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -208,3 +212,91 @@ export const referralEarnings = pgTable("referral_earnings", {
   livesEarned: integer("lives_earned").notNull(),       // floor(usdtEarned) lives credited
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+// ─── CLOB: Orders ─────────────────────────────────────────────────────────
+// Order book — setiap entry adalah limit order BUY atau SELL shares
+export const orderSideEnum = pgEnum("order_side", ["buy", "sell"]);
+export const orderStatusEnum = pgEnum("order_status", ["open", "partial", "filled", "cancelled"]);
+
+export const orders = pgTable("orders", {
+  id: serial("id").primaryKey(),
+  pollId: integer("poll_id").notNull().references(() => polls.id, { onDelete: "cascade" }),
+  userId: integer("user_id").notNull().references(() => users.id),
+  optionIndex: integer("option_index").notNull(),
+  side: orderSideEnum("side").notNull(),
+  // Harga 0.0001–0.9999 mewakili probabilitas (0.60 = 60%)
+  price: decimal("price", { precision: 6, scale: 4 }).notNull(),
+  size: integer("size").notNull(),                      // jumlah shares yang diminta
+  filledSize: integer("filled_size").default(0).notNull(),
+  status: orderStatusEnum("status").default("open").notNull(),
+  livesPaidIn: integer("lives_paid_in").default(0).notNull(), // lives dibayar ke pool (BUY only)
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ─── CLOB: Trades ─────────────────────────────────────────────────────────
+// Setiap trade adalah matching antara 1 BUY order dan 1 SELL order
+export const trades = pgTable("trades", {
+  id: serial("id").primaryKey(),
+  pollId: integer("poll_id").notNull().references(() => polls.id),
+  optionIndex: integer("option_index").notNull(),
+  makerOrderId: integer("maker_order_id").notNull().references(() => orders.id),
+  takerOrderId: integer("taker_order_id").notNull().references(() => orders.id),
+  makerUserId: integer("maker_user_id").notNull().references(() => users.id),
+  takerUserId: integer("taker_user_id").notNull().references(() => users.id),
+  side: orderSideEnum("side").notNull(),                // taker's perspective
+  price: decimal("price", { precision: 6, scale: 4 }).notNull(),
+  size: integer("size").notNull(),                      // shares traded
+  livesTransferred: integer("lives_transferred").notNull(), // lives dibayar ke seller
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// ─── CLOB: Positions ──────────────────────────────────────────────────────
+// Posisi agregat user per (pollId, optionIndex)
+export const positions = pgTable("positions", {
+  id: serial("id").primaryKey(),
+  pollId: integer("poll_id").notNull().references(() => polls.id),
+  userId: integer("user_id").notNull().references(() => users.id),
+  optionIndex: integer("option_index").notNull(),
+  shares: integer("shares").default(0).notNull(),       // net shares dipegang
+  avgEntryPrice: decimal("avg_entry_price", { precision: 6, scale: 4 }).default("0.5000").notNull(),
+  totalLivesIn: integer("total_lives_in").default(0).notNull(), // total biaya masuk
+  realizedPnl: integer("realized_pnl").default(0).notNull(),   // P&L dari posisi yang sudah ditutup
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  uniquePos: uniqueIndex("positions_user_poll_option").on(t.userId, t.pollId, t.optionIndex),
+}));
+
+// ─── CLOB: Price Snapshots ────────────────────────────────────────────────
+// Historis harga per opsi per poll — direkam setiap trade
+export const priceSnapshots = pgTable("price_snapshots", {
+  id: serial("id").primaryKey(),
+  pollId: integer("poll_id").notNull().references(() => polls.id),
+  optionIndex: integer("option_index").notNull(),
+  price: decimal("price", { precision: 6, scale: 4 }).notNull(),
+  snapshotAt: timestamp("snapshot_at").defaultNow().notNull(),
+});
+
+// ─── Poll Comments ─────────────────────────────────────────────────────────
+export const pollComments = pgTable("poll_comments", {
+  id: serial("id").primaryKey(),
+  pollId: integer("poll_id").notNull().references(() => polls.id, { onDelete: "cascade" }),
+  userId: integer("user_id").notNull().references(() => users.id),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  deletedAt: timestamp("deleted_at"),
+});
+
+// ─── Watchlist ─────────────────────────────────────────────────────────────
+// User mem-bookmark poll yang ingin dipantau
+export const watchlist = pgTable("watchlist", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  pollId: integer("poll_id").notNull().references(() => polls.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  unique: uniqueIndex("watchlist_user_poll").on(t.userId, t.pollId),
+}));

@@ -32,6 +32,10 @@ tags:
     description: Request penarikan USDT
   - name: Polls
     description: Multi-option prediction polls berbasis nyawa
+  - name: Orders
+    description: CLOB order book — limit orders BUY/SELL, order book, activity feed, price history
+  - name: Comments
+    description: Komentar user di setiap poll/market
   - name: Upload
     description: Upload gambar ke MinIO (profile photo, thumbnail poll)
   - name: Me
@@ -40,6 +44,8 @@ tags:
     description: Admin — manajemen user, kredit nyawa, ubah role
   - name: Leaderboard
     description: Papan peringkat pemain berdasarkan nyawa, kemenangan, atau referral
+  - name: Watchlist
+    description: Bookmark poll/market yang ingin dipantau
 
 security: []   # default: semua endpoint publik; endpoint yang butuh auth override dengan security: [{bearerAuth: []}]
 
@@ -1625,6 +1631,398 @@ paths:
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
 
+  # ─── CLOB: Orders ──────────────────────────────────────────
+  /api/polls/{id}/orders:
+    post:
+      tags: [Orders]
+      summary: Tempatkan limit order BUY atau SELL
+      description: |
+        - **BUY**: lives dipotong upfront (`ceil(size × price)`) dan masuk ke prize pool poll.
+        - **SELL**: shares dikunci dari posisi yang sudah dipegang.
+
+        Setelah order dibuat, engine matching dijalankan otomatis untuk mencari counterpart.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: ID poll
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [side, optionIndex, price, size]
+              properties:
+                side:
+                  type: string
+                  enum: [buy, sell]
+                  example: buy
+                optionIndex:
+                  type: integer
+                  minimum: 0
+                  example: 0
+                price:
+                  type: number
+                  format: float
+                  minimum: 0.0001
+                  maximum: 0.9999
+                  description: Harga limit (0–1, eksklusif), mewakili probabilitas
+                  example: 0.65
+                size:
+                  type: integer
+                  minimum: 1
+                  maximum: 100000
+                  description: Jumlah shares yang diminta
+                  example: 10
+                expiresAt:
+                  type: string
+                  format: date-time
+                  description: Waktu kadaluarsa order (opsional, GTC jika tidak diisi)
+                  example: "2026-04-20T00:00:00Z"
+      responses:
+        "201":
+          description: Order berhasil ditempatkan
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      order:
+                        $ref: "#/components/schemas/Order"
+                      matched:
+                        type: object
+                        properties:
+                          filledShares:
+                            type: integer
+                          avgFillPrice:
+                            type: number
+                          tradeCount:
+                            type: integer
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/polls/{id}/orders/{orderId}:
+    delete:
+      tags: [Orders]
+      summary: Batalkan order sendiri
+      description: |
+        - BUY: refund sisa lives yang belum terisi kembali ke balance user.
+        - SELL: shares yang terkunci dikembalikan ke posisi.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Order berhasil dibatalkan
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Order #42 berhasil dibatalkan"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Order sudah terisi penuh atau sudah dibatalkan
+
+  /api/polls/{id}/orderbook:
+    get:
+      tags: [Orders]
+      summary: Lihat order book (bids & asks)
+      description: Mengembalikan agregat BUY orders (bids) dan SELL orders (asks) per level harga.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: optionIndex
+          in: query
+          schema:
+            type: integer
+            default: 0
+          description: Index opsi yang ingin dilihat
+        - name: depth
+          in: query
+          schema:
+            type: integer
+            default: 10
+            maximum: 50
+          description: Jumlah level harga yang dikembalikan
+      responses:
+        "200":
+          description: Data order book
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      optionIndex:
+                        type: integer
+                      bids:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/OrderBookLevel"
+                      asks:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/OrderBookLevel"
+                      bestBid:
+                        type: number
+                        nullable: true
+                      bestAsk:
+                        type: number
+                        nullable: true
+                      midPrice:
+                        type: string
+                        nullable: true
+                        example: "0.6250"
+                      spread:
+                        type: string
+                        nullable: true
+                        example: "0.0500"
+
+  /api/polls/{id}/activity:
+    get:
+      tags: [Orders]
+      summary: Activity feed — riwayat trade terbaru
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: optionIndex
+          in: query
+          schema:
+            type: integer
+          description: Filter berdasarkan opsi (opsional)
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+      responses:
+        "200":
+          description: Daftar trade terbaru
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                        optionIndex:
+                          type: integer
+                        side:
+                          type: string
+                          enum: [buy, sell]
+                        price:
+                          type: string
+                          example: "0.6500"
+                        size:
+                          type: integer
+                        livesTransferred:
+                          type: integer
+                        buyerUsername:
+                          type: string
+                        sellerUsername:
+                          type: string
+                        createdAt:
+                          type: string
+                          format: date-time
+
+  /api/polls/{id}/price-history:
+    get:
+      tags: [Orders]
+      summary: Historis harga untuk chart
+      description: Mengembalikan semua price snapshot yang direkam setiap kali ada trade.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: optionIndex
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 200
+            maximum: 1000
+      responses:
+        "200":
+          description: Data historis harga
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        price:
+                          type: string
+                          example: "0.6500"
+                        snapshotAt:
+                          type: string
+                          format: date-time
+
+  # ─── Comments ──────────────────────────────────────────────
+  /api/polls/{id}/comments:
+    get:
+      tags: [Comments]
+      summary: Daftar komentar di sebuah poll (publik)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 30
+            maximum: 100
+      responses:
+        "200":
+          description: Daftar komentar
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Comment"
+                  pagination:
+                    $ref: "#/components/schemas/Pagination"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [Comments]
+      summary: Tambah komentar di sebuah poll
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body:
+                  type: string
+                  minLength: 1
+                  maxLength: 1000
+                  example: "Saya yakin ini YES, fundamental kuat!"
+      responses:
+        "201":
+          description: Komentar berhasil ditambahkan
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  data:
+                    $ref: "#/components/schemas/Comment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/polls/{id}/comments/{commentId}:
+    delete:
+      tags: [Comments]
+      summary: Hapus komentar sendiri (atau admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: commentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Komentar berhasil dihapus
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   # ─── Scrape ────────────────────────────────────────────
   /api/scrape/trigger:
     post:
@@ -1835,6 +2233,247 @@ paths:
                           enum: [open, closed, resolved]
                   pagination:
                     $ref: "#/components/schemas/Pagination"
+
+  /api/me/portfolio:
+    get:
+      tags: [Me]
+      summary: Portfolio — semua posisi aktif dengan unrealized P&L
+      description: |
+        Mengembalikan semua posisi (shares > 0) yang dimiliki user, beserta:
+        - Harga terakhir dari order book (`currentPrice`)
+        - Unrealized P&L = `shares × (currentPrice - avgEntryPrice)`
+        - Realized P&L dari posisi yang sudah dijual sebagian
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Daftar posisi aktif
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        pollId:
+                          type: integer
+                        pollTitle:
+                          type: string
+                        pollStatus:
+                          type: string
+                          enum: [draft, active, closed, resolved]
+                        optionIndex:
+                          type: integer
+                        optionLabel:
+                          type: string
+                        shares:
+                          type: integer
+                        avgEntryPrice:
+                          type: string
+                          example: "0.6000"
+                        totalLivesIn:
+                          type: integer
+                        realizedPnl:
+                          type: integer
+                        currentPrice:
+                          type: string
+                          nullable: true
+                          example: "0.7200"
+                        unrealizedPnl:
+                          type: integer
+                          nullable: true
+                          description: Positif = untung, negatif = rugi
+                        currentValue:
+                          type: integer
+                          nullable: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/me/orders:
+    get:
+      tags: [Me]
+      summary: Daftar order saya
+      description: Mengembalikan semua order (bisa difilter berdasarkan status).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, partial, filled, cancelled]
+          description: Filter berdasarkan status order
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        "200":
+          description: Daftar order
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/Order"
+                        - type: object
+                          properties:
+                            pollTitle:
+                              type: string
+                            optionLabel:
+                              type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/me/trades:
+    get:
+      tags: [Me]
+      summary: Riwayat trade saya — sebagai maker maupun taker
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 30
+            maximum: 100
+      responses:
+        "200":
+          description: Daftar trade
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                        pollId:
+                          type: integer
+                        pollTitle:
+                          type: string
+                        optionIndex:
+                          type: integer
+                        side:
+                          type: string
+                          enum: [buy, sell]
+                        price:
+                          type: string
+                          example: "0.6500"
+                        size:
+                          type: integer
+                        livesTransferred:
+                          type: integer
+                        role:
+                          type: string
+                          enum: [maker, taker]
+                          description: Peran user di trade ini
+                        createdAt:
+                          type: string
+                          format: date-time
+                  pagination:
+                    $ref: "#/components/schemas/Pagination"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/me/watchlist:
+    get:
+      tags: [Me]
+      summary: Daftar poll yang di-bookmark (watchlist)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        "200":
+          description: Daftar poll di watchlist
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/Poll"
+                        - type: object
+                          properties:
+                            watchedAt:
+                              type: string
+                              format: date-time
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/me/watchlist/{pollId}:
+    post:
+      tags: [Me]
+      summary: Tambah poll ke watchlist
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: pollId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "201":
+          description: Poll ditambahkan ke watchlist
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    delete:
+      tags: [Me]
+      summary: Hapus poll dari watchlist
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: pollId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Poll dihapus dari watchlist
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   # ─── Admin ────────────────────────────────────────────────
   /api/admin/stats:
@@ -2365,6 +3004,80 @@ components:
           type: integer
           example: 8
 
+    Order:
+      type: object
+      properties:
+        id:
+          type: integer
+        pollId:
+          type: integer
+        userId:
+          type: integer
+        optionIndex:
+          type: integer
+        side:
+          type: string
+          enum: [buy, sell]
+        price:
+          type: string
+          example: "0.6500"
+        size:
+          type: integer
+        filledSize:
+          type: integer
+        status:
+          type: string
+          enum: [open, partial, filled, cancelled]
+        livesPaidIn:
+          type: integer
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    OrderBookLevel:
+      type: object
+      properties:
+        price:
+          type: string
+          example: "0.6500"
+        size:
+          type: integer
+          description: Total shares tersedia di level harga ini
+        orders:
+          type: integer
+          description: Jumlah order di level ini
+
+    Comment:
+      type: object
+      properties:
+        id:
+          type: integer
+        pollId:
+          type: integer
+        userId:
+          type: integer
+        username:
+          type: string
+        avatarUrl:
+          type: string
+          nullable: true
+        body:
+          type: string
+          example: "Saya yakin ini YES!"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
     UserPublic:
       type: object
       properties:
@@ -2568,6 +3281,19 @@ components:
         totalVotes:
           type: integer
           example: 42
+        totalVolume:
+          type: integer
+          description: Total lives yang diperdagangkan sepanjang waktu
+          example: 1500
+        prizePool:
+          type: integer
+          description: Total lives yang terkumpul di prize pool (dari BUY orders)
+          example: 420
+        lastPrices:
+          type: object
+          description: Harga terakhir per opsi dari CLOB — key adalah optionIndex
+          nullable: true
+          example: { "0": "0.6500", "1": "0.3500" }
         createdAt:
           type: string
           format: date-time

@@ -43,6 +43,20 @@
       "when": 1776491556203,
       "tag": "0005_rainy_kat_farrell",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1776493936764,
+      "tag": "0006_loud_richard_fisk",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1776495081108,
+      "tag": "0007_faithful_colonel_america",
+      "breakpoints": true
     }
   ]
 }
