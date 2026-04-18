@@ -131,7 +131,12 @@ paths:
                   example: secret1234
       responses:
         "200":
-          description: Login successful
+          description: Login successful. Refresh token diset sebagai HttpOnly cookie (`refresh_token`).
+          headers:
+            Set-Cookie:
+              description: "refresh_token=<token>; HttpOnly; Path=/api/auth; Max-Age=604800; SameSite=Strict"
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -143,9 +148,6 @@ paths:
                       accessToken:
                         type: string
                         description: Short-lived JWT (15m)
-                      refreshToken:
-                        type: string
-                        description: Long-lived JWT (7d), stored in Redis
                       user:
                         $ref: "#/components/schemas/UserPublic"
         "401":
@@ -165,20 +167,28 @@ paths:
     post:
       tags: [Auth]
       summary: Refresh access token
-      description: Rotates both access and refresh tokens. The old refresh token is revoked.
+      description: |
+        Rotates access token menggunakan refresh token dari HttpOnly cookie (`refresh_token`).
+        Cookie baru dikirim kembali otomatis. Refresh token lama direvoke dari Redis.
+        Fallback: jika cookie tidak ada, bisa kirim `refreshToken` di request body (untuk klien mobile).
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               type: object
-              required: [refreshToken]
               properties:
                 refreshToken:
                   type: string
+                  description: Opsional — gunakan cookie jika tersedia
       responses:
         "200":
-          description: New token pair issued
+          description: Access token baru diterbitkan
+          headers:
+            Set-Cookie:
+              description: Refresh token baru diset sebagai HttpOnly cookie
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -188,8 +198,6 @@ paths:
                     type: object
                     properties:
                       accessToken:
-                        type: string
-                      refreshToken:
                         type: string
         "401":
           description: Invalid or revoked refresh token
@@ -225,18 +233,21 @@ paths:
     post:
       tags: [Auth]
       summary: Logout and revoke refresh token
+      description: |
+        Merevoke refresh token dari Redis dan menghapus HttpOnly cookie `refresh_token`.
+        Fallback: bisa kirim `refreshToken` di body jika cookie tidak ada.
       security:
         - bearerAuth: []
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               type: object
-              required: [refreshToken]
               properties:
                 refreshToken:
                   type: string
+                  description: Opsional — gunakan cookie jika tersedia
       responses:
         "200":
           description: Logged out successfully

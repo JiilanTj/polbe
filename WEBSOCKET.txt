@@ -1,0 +1,209 @@
+================================================================================
+  POLYMARKET BACKEND — WebSocket Documentation
+================================================================================
+
+Endpoint : ws://localhost:3000/ws
+Protocol : Native Bun WebSocket (no Socket.io)
+Auth     : Token-based, dikirim via message setelah connect (bukan header)
+
+
+────────────────────────────────────────────────────────────────────────────────
+  CARA CONNECT
+────────────────────────────────────────────────────────────────────────────────
+
+1. Buka koneksi ke ws://localhost:3000/ws
+2. Server langsung kirim event "connected"
+3. (Opsional) Kirim event "auth" dengan access token untuk terima notifikasi
+   personal (order fill, payout, dll)
+4. (Opsional) Subscribe ke channel yang diinginkan
+
+
+────────────────────────────────────────────────────────────────────────────────
+  CLIENT → SERVER (pesan yang dikirim client)
+────────────────────────────────────────────────────────────────────────────────
+
+Semua pesan dalam format JSON.
+
+  1. AUTH — daftarkan koneksi sebagai milik user tertentu
+     { "event": "auth", "token": "<access_token>" }
+     Response:
+       OK    → { "event": "auth:ok",    "data": { "userId": 42 } }
+       Error → { "event": "auth:error", "data": { "error": "Token tidak valid atau kadaluarsa" } }
+
+  2. SUBSCRIBE — mulai terima event dari channel tertentu
+     { "event": "subscribe", "category": "<channel>" }
+     Response:
+       { "event": "subscribed", "data": { "category": "<channel>" } }
+
+  3. UNSUBSCRIBE — berhenti terima event dari channel
+     { "event": "unsubscribe", "category": "<channel>" }
+     Response:
+       { "event": "unsubscribed", "data": { "category": "<channel>" } }
+
+  4. PONG — balas ping dari server (keepalive)
+     { "event": "pong" }
+
+
+────────────────────────────────────────────────────────────────────────────────
+  CHANNELS (SUBSCRIPTION CATEGORIES)
+────────────────────────────────────────────────────────────────────────────────
+
+  "all"         — Semua event global (default, otomatis di-subscribe saat connect)
+  "polls"       — Event seputar perubahan poll (status, vote)
+  "user:{id}"   — Event personal milik user dengan ID tertentu
+                  Hanya aktif setelah kirim event "auth" dengan token yang valid
+
+
+────────────────────────────────────────────────────────────────────────────────
+  SERVER → CLIENT (event yang dikirim server)
+────────────────────────────────────────────────────────────────────────────────
+
+Format selalu: { "event": "<nama>", "data": { ... } }
+
+  ── System ──────────────────────────────────────────────────────────────────
+
+  connected
+    Dikirim: saat client baru connect
+    { "event": "connected", "data": { "message": "Connected to Polymarket WS" } }
+
+  ping
+    Dikirim: setiap 30 detik sebagai heartbeat
+    { "event": "ping" }
+
+  ── News & Trends (channel: "all") ──────────────────────────────────────────
+
+  news:new
+    Trigger : Setelah job scraping selesai menyimpan artikel baru
+    { "event": "news:new", "data": { "count": 12 } }
+
+  trend:update
+    Trigger : Setelah trend baru terdeteksi dari artikel
+    { "event": "trend:update", "data": { "trends": [ ... ] } }
+
+  question:new
+    Trigger : Setelah AI generate prediction questions baru
+    { "event": "question:new", "data": { "questions": [ ... ] } }
+
+  ── Polls (channel: "polls" atau "all") ─────────────────────────────────────
+
+  poll:activated
+    Trigger : Admin mengubah status poll ke "active"
+    { "event": "poll:activated", "data": { "pollId": 7, "title": "..." } }
+
+  poll:vote_cast
+    Trigger : User berhasil vote di poll
+    { "event": "poll:vote_cast", "data": { "pollId": 7, "optionIndex": 1, "totalVotes": 42 } }
+
+  poll:resolved
+    Trigger : Admin me-resolve poll (menentukan pemenang)
+    {
+      "event": "poll:resolved",
+      "data": { "pollId": 7, "winnerOptionIndex": 0, "totalPayout": 1500 }
+    }
+
+  poll:closed
+    Trigger : Poll melewati endAt dan di-close oleh cron job
+    { "event": "poll:closed", "data": { "pollId": 7, "title": "..." } }
+
+  ── CLOB Trading (channel: "all") ───────────────────────────────────────────
+
+  poll:trade
+    Trigger : Setiap kali ada trade match di CLOB engine
+    {
+      "event": "poll:trade",
+      "data": {
+        "pollId"       : 7,
+        "optionIndex"  : 0,
+        "price"        : "0.6500",
+        "size"         : 10,
+        "makerUserId"  : 3,
+        "takerUserId"  : 5
+      }
+    }
+
+  ── User Personal (channel: "user:{id}") ────────────────────────────────────
+  Hanya dikirim ke koneksi yang sudah auth dengan token user bersangkutan.
+
+  poll:payout
+    Trigger : User memenangkan poll yang di-resolve
+    {
+      "event": "poll:payout",
+      "data": { "pollId": 7, "payout": 1200 }
+    }
+
+  topup:approved
+    Trigger : Admin approve request topup nyawa
+    {
+      "event": "topup:approved",
+      "data": { "topupId": 3, "livesAmount": 15, "usdtAmount": "10.00" }
+    }
+
+  topup:rejected
+    Trigger : Admin reject request topup
+    {
+      "event": "topup:rejected",
+      "data": { "topupId": 3, "adminNote": "Bukti tidak valid" }
+    }
+
+  withdrawal:approved
+    Trigger : Admin approve request withdrawal
+    {
+      "event": "withdrawal:approved",
+      "data": {
+        "withdrawalId" : 2,
+        "usdtAmount"   : "99.00",
+        "txHash"       : "0xabc123..."
+      }
+    }
+
+  withdrawal:rejected
+    Trigger : Admin reject request withdrawal
+    {
+      "event": "withdrawal:rejected",
+      "data": { "withdrawalId": 2, "adminNote": "Alamat wallet tidak valid" }
+    }
+
+
+────────────────────────────────────────────────────────────────────────────────
+  CONTOH FLOW (JavaScript)
+────────────────────────────────────────────────────────────────────────────────
+
+const ws = new WebSocket("ws://localhost:3000/ws");
+
+ws.onopen = () => {
+  // Auth agar terima notifikasi personal
+  ws.send(JSON.stringify({ event: "auth", token: "<access_token>" }));
+
+  // Subscribe ke channel polls
+  ws.send(JSON.stringify({ event: "subscribe", category: "polls" }));
+};
+
+ws.onmessage = (e) => {
+  const msg = JSON.parse(e.data);
+
+  if (msg.event === "ping") {
+    ws.send(JSON.stringify({ event: "pong" }));
+  }
+
+  if (msg.event === "poll:trade") {
+    console.log("Trade baru:", msg.data);
+    // Update order book UI
+  }
+
+  if (msg.event === "poll:payout") {
+    console.log("Kamu menang!", msg.data.payout, "nyawa");
+    // Tampilkan notifikasi
+  }
+};
+
+
+────────────────────────────────────────────────────────────────────────────────
+  CATATAN
+────────────────────────────────────────────────────────────────────────────────
+
+- Koneksi idle tidak terputus karena ada heartbeat ping setiap 30 detik
+- Token yang dipakai untuk auth WS adalah access token yang sama dengan REST API
+- Jika token expired, kirim ulang event "auth" dengan token baru (setelah refresh)
+- Channel "user:{id}" otomatis aktif setelah auth berhasil, tidak perlu subscribe manual
+
+================================================================================

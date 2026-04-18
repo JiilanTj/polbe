@@ -9,6 +9,8 @@ import { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema 
 
 // Refresh token TTL in seconds (7 days)
 const REFRESH_TTL = 60 * 60 * 24 * 7;
+const COOKIE_NAME = "refresh_token";
+const IS_PROD = process.env.NODE_ENV === "production";
 // Password reset token TTL: 1 jam
 const RESET_TTL = 60 * 60;
 // Email verification token TTL: 24 jam
@@ -127,18 +129,30 @@ export const authController = {
     // Store refresh token in Redis
     await redis.set(refreshTokenKey(user.id, tokenId), "1", "EX", REFRESH_TTL);
 
+    // Set refresh token sebagai HttpOnly cookie (aman dari XSS)
+    c.header(
+      "Set-Cookie",
+      `${COOKIE_NAME}=${refreshToken}; HttpOnly; Path=/api/auth; Max-Age=${REFRESH_TTL}; SameSite=Strict${IS_PROD ? "; Secure" : ""}`,
+    );
+
     return c.json({
       data: {
         accessToken,
-        refreshToken,
         user: { id: user.id, email: user.email, username: user.username, role: user.role },
       },
     });
   },
 
   async refresh(c: Context) {
-    const body = await c.req.json<{ refreshToken: string }>();
-    const { refreshToken } = body;
+    // Baca refresh token dari HttpOnly cookie (atau fallback body untuk kompatibilitas mobile)
+    const cookieHeader = c.req.header("cookie") ?? "";
+    const cookieToken = cookieHeader
+      .split(";")
+      .map((s) => s.trim())
+      .find((s) => s.startsWith(`${COOKIE_NAME}=`))?.slice(COOKIE_NAME.length + 1);
+
+    const body = await c.req.json<{ refreshToken?: string }>().catch(() => ({ refreshToken: undefined }));
+    const refreshToken = cookieToken ?? body.refreshToken;
 
     if (!refreshToken) return c.json({ error: "Refresh token is required" }, 400);
 
@@ -174,7 +188,13 @@ export const authController = {
 
     await redis.set(refreshTokenKey(user.id, newTokenId), "1", "EX", REFRESH_TTL);
 
-    return c.json({ data: { accessToken: newAccessToken, refreshToken: newRefreshToken } });
+    // Rotate cookie
+    c.header(
+      "Set-Cookie",
+      `${COOKIE_NAME}=${newRefreshToken}; HttpOnly; Path=/api/auth; Max-Age=${REFRESH_TTL}; SameSite=Strict${IS_PROD ? "; Secure" : ""}`,
+    );
+
+    return c.json({ data: { accessToken: newAccessToken } });
   },
 
   async verifyMe(c: Context) {
@@ -189,8 +209,15 @@ export const authController = {
   },
 
   async logout(c: Context) {
-    const body = await c.req.json<{ refreshToken: string }>().catch(() => ({ refreshToken: "" }));
-    const { refreshToken } = body;
+    // Baca dari cookie atau body
+    const cookieHeader = c.req.header("cookie") ?? "";
+    const cookieToken = cookieHeader
+      .split(";")
+      .map((s) => s.trim())
+      .find((s) => s.startsWith(`${COOKIE_NAME}=`))?.slice(COOKIE_NAME.length + 1);
+
+    const body = await c.req.json<{ refreshToken?: string }>().catch(() => ({ refreshToken: undefined }));
+    const refreshToken = cookieToken ?? body.refreshToken;
 
     if (refreshToken) {
       try {
@@ -202,6 +229,9 @@ export const authController = {
         // Token already invalid — that's fine
       }
     }
+
+    // Clear cookie
+    c.header("Set-Cookie", `${COOKIE_NAME}=; HttpOnly; Path=/api/auth; Max-Age=0; SameSite=Strict${IS_PROD ? "; Secure" : ""}`);
 
     return c.json({ message: "Logged out successfully" });
   },
