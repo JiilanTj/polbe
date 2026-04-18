@@ -32,6 +32,14 @@ tags:
     description: Request penarikan USDT
   - name: Polls
     description: Multi-option prediction polls berbasis nyawa
+  - name: Upload
+    description: Upload gambar ke MinIO (profile photo, thumbnail poll)
+  - name: Me
+    description: Profil pengguna — riwayat nyawa, referral, dan polls
+  - name: Admin
+    description: Admin — manajemen user, kredit nyawa, ubah role
+  - name: Leaderboard
+    description: Papan peringkat pemain berdasarkan nyawa, kemenangan, atau referral
 
 paths:
   # ─── Auth ──────────────────────────────────────────────
@@ -1505,6 +1513,401 @@ paths:
                     type: string
                     example: "Scrape job triggered"
 
+  # ─── Upload ────────────────────────────────────────────────
+  /api/upload:
+    post:
+      tags: [Upload]
+      summary: Upload gambar ke MinIO
+      description: |
+        Upload file gambar (jpeg/png/webp/gif) maksimal 5MB.
+        File disimpan di path `uploads/user-{userId}/{timestamp}-{random}.{ext}`.
+        Mengembalikan URL publik dari MinIO.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: File gambar (jpeg/png/webp/gif, maks 5MB)
+      responses:
+        "200":
+          description: Upload berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    example: "http://localhost:9000/polymarket/uploads/user-1/1715000000000-a1b2c3d4.jpg"
+        "400":
+          description: Tipe file tidak valid atau file terlalu besar
+        "401":
+          description: Unauthorized
+        "429":
+          description: Rate limit exceeded (20 upload per menit)
+
+  # ─── Me ────────────────────────────────────────────────────
+  /api/me:
+    get:
+      tags: [Me]
+      summary: Profil pengguna yang sedang login
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Data profil pengguna
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "401":
+          description: Unauthorized
+    patch:
+      tags: [Me]
+      summary: Update profil (username / password)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                  example: newusername
+                currentPassword:
+                  type: string
+                  description: Wajib diisi jika ingin ganti password
+                  example: oldpassword
+                newPassword:
+                  type: string
+                  minLength: 8
+                  example: newpassword123
+      responses:
+        "200":
+          description: Profil berhasil diupdate
+        "400":
+          description: Password lama salah atau validasi gagal
+        "401":
+          description: Unauthorized
+
+  /api/me/lives-history:
+    get:
+      tags: [Me]
+      summary: Riwayat transaksi nyawa
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20 }
+      responses:
+        "200":
+          description: Paginated riwayat transaksi nyawa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/LivesTransaction"
+                  pagination:
+                    $ref: "#/components/schemas/Pagination"
+
+  /api/me/referrals:
+    get:
+      tags: [Me]
+      summary: Daftar referral dan riwayat komisi
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20 }
+      responses:
+        "200":
+          description: Downline dan komisi referral
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                    example: 5
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ReferralEntry"
+                  recentEarnings:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ReferralEarning"
+
+  /api/me/polls:
+    get:
+      tags: [Me]
+      summary: Daftar polls yang sudah pernah divote user
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20 }
+      responses:
+        "200":
+          description: Polls yang pernah diikuti user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        pollId:
+                          type: integer
+                        question:
+                          type: string
+                        optionIndex:
+                          type: integer
+                        livesWagered:
+                          type: integer
+                        payoutLives:
+                          type: string
+                        status:
+                          type: string
+                          enum: [open, closed, resolved]
+                  pagination:
+                    $ref: "#/components/schemas/Pagination"
+
+  # ─── Admin ────────────────────────────────────────────────
+  /api/admin/users:
+    get:
+      tags: [Admin]
+      summary: List semua user (dengan search & filter)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20 }
+        - in: query
+          name: search
+          schema: { type: string }
+          description: Cari berdasarkan email atau username
+        - in: query
+          name: role
+          schema:
+            type: string
+            enum: [user, admin, platform]
+      responses:
+        "200":
+          description: Daftar user dengan pagination
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden — hanya admin
+
+  /api/admin/users/{id}:
+    get:
+      tags: [Admin]
+      summary: Detail user beserta 10 transaksi terakhir
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Detail user
+        "404":
+          description: User tidak ditemukan
+
+  /api/admin/users/{id}/toggle:
+    patch:
+      tags: [Admin]
+      summary: Aktifkan / nonaktifkan user
+      description: Tidak bisa menonaktifkan diri sendiri.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Status user berhasil diubah
+        "400":
+          description: Tidak bisa menonaktifkan diri sendiri
+
+  /api/admin/users/{id}/role:
+    patch:
+      tags: [Admin]
+      summary: Ganti role user
+      description: Tidak bisa mengubah role diri sendiri.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role:
+                  type: string
+                  enum: [user, admin, platform]
+      responses:
+        "200":
+          description: Role berhasil diubah
+        "400":
+          description: Tidak bisa mengubah role diri sendiri
+
+  /api/admin/users/{id}/credit:
+    post:
+      tags: [Admin]
+      summary: Kredit atau debit nyawa user secara manual
+      description: Gunakan nilai negatif untuk debit. Saldo tidak boleh minus.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount:
+                  type: integer
+                  description: Jumlah nyawa — positif = kredit, negatif = debit
+                  example: 10
+                note:
+                  type: string
+                  example: Bonus event hari kemerdekaan
+      responses:
+        "200":
+          description: Nyawa berhasil dikredit/didebit
+        "400":
+          description: Saldo tidak cukup untuk debit
+
+  # ─── Leaderboard ───────────────────────────────────────────
+  /api/leaderboard:
+    get:
+      tags: [Leaderboard]
+      summary: Papan peringkat berdasarkan saldo nyawa
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20 }
+      responses:
+        "200":
+          description: Top user berdasarkan lives_balance
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/LeaderboardEntry"
+
+  /api/leaderboard/wins:
+    get:
+      tags: [Leaderboard]
+      summary: Papan peringkat berdasarkan jumlah kemenangan poll
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20 }
+      responses:
+        "200":
+          description: Top user berdasarkan total wins
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/LeaderboardEntry"
+                        - type: object
+                          properties:
+                            wins:
+                              type: integer
+                              example: 12
+
+  /api/leaderboard/referrals:
+    get:
+      tags: [Leaderboard]
+      summary: Papan peringkat berdasarkan jumlah referral
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20 }
+      responses:
+        "200":
+          description: Top user berdasarkan total referral
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/LeaderboardEntry"
+                        - type: object
+                          properties:
+                            referralCount:
+                              type: integer
+                              example: 8
+
 components:
   schemas:
     Article:
@@ -2078,6 +2481,105 @@ components:
         error:
           type: string
           example: "Not found"
+
+    Pagination:
+      type: object
+      properties:
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+        totalPages:
+          type: integer
+
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+        username:
+          type: string
+        role:
+          type: string
+          enum: [user, admin, platform]
+        livesBalance:
+          type: integer
+        livesRecoveryAt:
+          type: string
+          format: date-time
+          nullable: true
+        referralCode:
+          type: string
+        referralStats:
+          type: object
+          properties:
+            downlineCount:
+              type: integer
+            totalEarned:
+              type: number
+        createdAt:
+          type: string
+          format: date-time
+
+    LivesTransaction:
+      type: object
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [recovery, purchase, vote_debit, vote_payout, admin_credit, admin_debit, referral_bonus]
+        amount:
+          type: integer
+        balanceAfter:
+          type: integer
+        note:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    ReferralEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    ReferralEarning:
+      type: object
+      properties:
+        id:
+          type: integer
+        usdtAmount:
+          type: string
+        note:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    LeaderboardEntry:
+      type: object
+      properties:
+        rank:
+          type: integer
+        userId:
+          type: integer
+        username:
+          type: string
+        livesBalance:
+          type: integer
 
   responses:
     BadRequest:

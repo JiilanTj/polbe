@@ -3,6 +3,7 @@ import { db } from "../../db";
 import { polls, pollVotes, users, livesTransactions } from "../../db/schema";
 import { eq, desc, sql, and } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
+import { broadcastEvent } from "../../ws/handler";
 
 // ─── Helper: kredit/debit nyawa + catat transaksi ──────────────────────────
 async function adjustLives(
@@ -323,6 +324,25 @@ export const pollsController = {
 
     const winnerLabel = poll.options?.[winnerOptionIndex] ?? winnerOptionIndex;
     const platformLives = Math.floor(totalLoserLives * feePercent);
+
+    // Broadcast ke semua koneksi WS — channel "polls"
+    broadcastEvent("poll:resolved", {
+      pollId,
+      winnerOption: winnerLabel,
+      winnerOptionIndex,
+      totalVoters: allVotes.length,
+      winners: winnerVotes.length,
+      losers: loserVotes.length,
+    }, "polls");
+
+    // Broadcast personal notif ke setiap winner
+    for (const vote of winnerVotes) {
+      broadcastEvent("poll:payout", {
+        pollId,
+        winnerOption: winnerLabel,
+        livesWagered: vote.livesWagered,
+      }, `user:${vote.userId}`);
+    }
 
     return c.json({
       message: `Poll #${pollId} resolved! Pemenang: "${winnerLabel}"`,

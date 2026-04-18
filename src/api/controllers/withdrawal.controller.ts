@@ -3,6 +3,7 @@ import { db } from "../../db";
 import { withdrawalRequests } from "../../db/schema";
 import { eq, desc } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
+import { broadcastEvent } from "../../ws/handler";
 
 export const withdrawalController = {
   // POST /api/withdrawal — user minta tarik saldo
@@ -86,6 +87,13 @@ export const withdrawalController = {
       .where(eq(withdrawalRequests.id, id))
       .returning();
 
+    broadcastEvent("withdrawal:approved", {
+      userId: req.userId,
+      withdrawalId: id,
+      usdtAmount: req.usdtAmount,
+      txHash: body.txHash ?? null,
+    }, `user:${req.userId}`);
+
     return c.json({
       message: `Withdrawal #${id} disetujui${body.txHash ? ` (TxHash: ${body.txHash})` : ""}`,
       data: updated,
@@ -113,6 +121,12 @@ export const withdrawalController = {
         processedAt: new Date(),
       })
       .where(eq(withdrawalRequests.id, id));
+
+    broadcastEvent("withdrawal:rejected", {
+      userId: req.userId,
+      withdrawalId: id,
+      note: body.adminNote ?? null,
+    }, `user:${req.userId}`);
 
     return c.json({ message: `Withdrawal #${id} ditolak` });
   },

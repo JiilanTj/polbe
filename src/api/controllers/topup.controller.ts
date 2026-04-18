@@ -3,6 +3,7 @@ import { db } from "../../db";
 import { topupRequests, lifePackages, users, livesTransactions, referralEarnings } from "../../db/schema";
 import { eq, desc } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
+import { broadcastEvent } from "../../ws/handler";
 
 // Referral fee rate: 0.05 USDT per 1 USDT topup downline
 const REFERRAL_FEE_RATE = 0.05;
@@ -170,6 +171,13 @@ export const topupController = {
       }
     }
 
+    // Broadcast notifikasi ke koneksi WS user bersangkutan
+    broadcastEvent("topup:approved", {
+      userId: req.userId,
+      livesAmount: req.livesAmount,
+      newBalance,
+    }, `user:${req.userId}`);
+
     return c.json({
       message: `Topup disetujui. User #${req.userId} mendapat ${req.livesAmount} nyawa (saldo baru: ${newBalance})`,
     });
@@ -196,6 +204,12 @@ export const topupController = {
         processedAt: new Date(),
       })
       .where(eq(topupRequests.id, id));
+
+    broadcastEvent("topup:rejected", {
+      userId: req.userId,
+      topupId: id,
+      note: body.adminNote ?? null,
+    }, `user:${req.userId}`);
 
     return c.json({ message: `Topup #${id} ditolak` });
   },

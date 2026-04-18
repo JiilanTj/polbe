@@ -27,6 +27,12 @@ export const wsHandler = {
         ws.data.subscriptions.delete(msg.category);
         ws.send(JSON.stringify({ event: "unsubscribed", data: { category: msg.category } }));
       }
+
+      // Daftarkan sebagai koneksi milik user tertentu (setelah login, kirim: { event: "auth", userId: 123 })
+      if (msg.event === "auth" && typeof msg.userId === "number") {
+        ws.data.subscriptions.add(`user:${msg.userId}`);
+        ws.send(JSON.stringify({ event: "auth:ok", data: { userId: msg.userId } }));
+      }
     } catch {
       // Ignore invalid messages
     }

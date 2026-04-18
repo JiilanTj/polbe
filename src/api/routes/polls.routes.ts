@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { pollsController } from "../controllers/polls.controller";
 import { authMiddleware, requireRole } from "../middlewares/auth.middleware";
+import { voteRateLimit } from "../middlewares/rate-limit.middleware";
 
 export const pollsRoutes = new Hono();
 
@@ -9,7 +10,7 @@ pollsRoutes.get("/", pollsController.list);
 pollsRoutes.get("/:id", pollsController.getById);
 
 // User auth — vote & lihat vote sendiri
-pollsRoutes.post("/:id/vote", authMiddleware, pollsController.vote);
+pollsRoutes.post("/:id/vote", authMiddleware, voteRateLimit, pollsController.vote);
 pollsRoutes.get("/:id/my-vote", authMiddleware, pollsController.myVote);
 
 // Admin/platform — kelola poll

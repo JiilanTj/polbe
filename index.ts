@@ -7,6 +7,7 @@ import { wsHandler } from "./src/ws/handler";
 import { startScheduler } from "./src/jobs/scheduler";
 import { closeDb } from "./src/db";
 import { config } from "./src/config";
+import { ensureBucket } from "./src/lib/minio";
 
 // ─── Hono App ────────────────────────────────────────────────
 const app = new Hono();
@@ -43,11 +44,19 @@ app.get("/", (c) => {
     admin: "/admin",
     docs: "/docs",
     endpoints: {
+      auth: "/api/auth",
       news: "/api/news",
       trends: "/api/trends",
       questions: "/api/questions",
+      polls: "/api/polls",
+      packages: "/api/packages",
+      topup: "/api/topup",
+      withdrawal: "/api/withdrawal",
+      me: "/api/me",
+      admin: "/api/admin",
+      leaderboard: "/api/leaderboard",
+      upload: "POST /api/upload",
       scrape: "POST /api/scrape/trigger",
-      generate: "POST /api/questions/generate",
     },
     websocket: `ws://localhost:${config.server.port}/ws`,
   });
@@ -78,6 +87,9 @@ console.log(`🔌 WebSocket at ws://localhost:${server.port}/ws`);
 
 // ─── Start Scheduler ─────────────────────────────────────────
 startScheduler();
+
+// ─── Init MinIO Bucket ───────────────────────────────────────
+ensureBucket().catch((err) => console.error("[MinIO] Gagal init bucket:", err.message));
 
 // ─── Graceful Shutdown ───────────────────────────────────────
 process.on("SIGINT", async () => {

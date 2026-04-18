@@ -25,6 +25,15 @@ export const config = {
   scraping: {
     intervalMinutes: Number(process.env.SCRAPE_INTERVAL_MINUTES) || 15,
   },
+  minio: {
+    endpoint: process.env.MINIO_ENDPOINT || "localhost",
+    port: Number(process.env.MINIO_PORT) || 9000,
+    useSSL: process.env.MINIO_USE_SSL === "true",
+    accessKey: process.env.MINIO_ACCESS_KEY || "minioadmin",
+    secretKey: process.env.MINIO_SECRET_KEY || "minioadmin123",
+    bucket: process.env.MINIO_BUCKET || "polymarket",
+    publicUrl: process.env.MINIO_PUBLIC_URL || "http://localhost:9000",
+  },
   rssFeeds: [
     { name: "Google News", url: "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en" },
     { name: "Google News - World", url: "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx1YlY4U0FtVnVHZ0pWVXlnQVAB?hl=en-US&gl=US&ceid=US:en" },

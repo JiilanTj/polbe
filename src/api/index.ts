@@ -8,9 +8,17 @@ import { packagesRoutes } from "./routes/packages.routes";
 import { topupRoutes } from "./routes/topup.routes";
 import { withdrawalRoutes } from "./routes/withdrawal.routes";
 import { pollsRoutes } from "./routes/polls.routes";
+import { meRoutes } from "./routes/me.routes";
+import { adminRoutes } from "./routes/admin.routes";
+import { leaderboardRoutes } from "./routes/leaderboard.routes";
+import { uploadRoutes } from "./routes/upload.routes";
+import { defaultRateLimit } from "./middlewares/rate-limit.middleware";
 
 export function registerRoutes(app: Hono) {
   const api = new Hono();
+
+  // Global rate limit
+  api.use("/*", defaultRateLimit);
 
   api.route("/auth", authRoutes);
   api.route("/news", newsRoutes);
@@ -21,6 +29,10 @@ export function registerRoutes(app: Hono) {
   api.route("/topup", topupRoutes);
   api.route("/withdrawal", withdrawalRoutes);
   api.route("/polls", pollsRoutes);
+  api.route("/me", meRoutes);
+  api.route("/admin", adminRoutes);
+  api.route("/leaderboard", leaderboardRoutes);
+  api.route("/upload", uploadRoutes);
 
   app.route("/api", api);
 }
