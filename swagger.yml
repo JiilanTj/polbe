@@ -169,18 +169,8 @@ paths:
       summary: Refresh access token
       description: |
         Rotates access token menggunakan refresh token dari HttpOnly cookie (`refresh_token`).
+        Cookie dikirim otomatis oleh browser — tidak perlu request body.
         Cookie baru dikirim kembali otomatis. Refresh token lama direvoke dari Redis.
-        Fallback: jika cookie tidak ada, bisa kirim `refreshToken` di request body (untuk klien mobile).
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                refreshToken:
-                  type: string
-                  description: Opsional — gunakan cookie jika tersedia
       responses:
         "200":
           description: Access token baru diterbitkan
@@ -235,19 +225,9 @@ paths:
       summary: Logout and revoke refresh token
       description: |
         Merevoke refresh token dari Redis dan menghapus HttpOnly cookie `refresh_token`.
-        Fallback: bisa kirim `refreshToken` di body jika cookie tidak ada.
+        Cookie dikirim otomatis oleh browser — tidak perlu request body.
       security:
         - bearerAuth: []
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                refreshToken:
-                  type: string
-                  description: Opsional — gunakan cookie jika tersedia
       responses:
         "200":
           description: Logged out successfully
