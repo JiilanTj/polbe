@@ -150,6 +150,54 @@ export const questionsController = {
     return c.json({ data: created }, 201);
   },
 
+  async updateStatus(c: Context) {
+    const id = Number(c.req.param("id"));
+    if (!id || isNaN(id)) return c.json({ error: "ID tidak valid" }, 400);
+
+    const body = await c.req.json().catch(() => null);
+    if (!body) return c.json({ error: "Request body tidak valid (harus JSON)" }, 400);
+
+    const { status, note } = body as { status?: string; note?: string };
+
+    if (!status) return c.json({ error: "Field 'status' wajib diisi" }, 422);
+    if (!VALID_STATUSES.includes(status as QuestionStatus)) {
+      return c.json({ error: `Status tidak valid. Pilihan: ${VALID_STATUSES.join(", ")}` }, 422);
+    }
+
+    // Pastikan question ada
+    const [existing] = await db
+      .select({ id: generatedQuestions.id, status: generatedQuestions.status })
+      .from(generatedQuestions)
+      .where(eq(generatedQuestions.id, id));
+
+    if (!existing) return c.json({ error: "Question tidak ditemukan" }, 404);
+
+    // Guard: resolved/closed tidak bisa di-revert ke draft/pending
+    const TERMINAL_STATUSES: QuestionStatus[] = ["resolved", "closed"];
+    if (TERMINAL_STATUSES.includes(existing.status as QuestionStatus)) {
+      return c.json({
+        error: `Question dengan status '${existing.status}' tidak bisa diubah lagi`,
+      }, 409);
+    }
+
+    const [updated] = await db
+      .update(generatedQuestions)
+      .set({
+        status: status as QuestionStatus,
+        updatedAt: new Date(),
+        ...(status === "active" && !existing.status.includes("active")
+          ? { startDate: new Date() }
+          : {}),
+      })
+      .where(eq(generatedQuestions.id, id))
+      .returning();
+
+    return c.json({
+      message: `Status question #${id} diubah ke '${status}'${note ? ` — ${note}` : ""}`,
+      data: updated,
+    });
+  },
+
   async generate(c: Context) {
     const recentArticles = await db
       .select({ title: articles.title, description: articles.description })

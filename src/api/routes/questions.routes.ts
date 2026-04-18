@@ -11,3 +11,6 @@ questionsRoutes.get("/:id", questionsController.getById);
 // Protected (admin / platform only)
 questionsRoutes.post("/", authMiddleware, requireRole("admin", "platform"), questionsController.create);
 questionsRoutes.post("/generate", authMiddleware, requireRole("admin", "platform"), questionsController.generate);
+
+// Admin only — approve / reject / update status
+questionsRoutes.patch("/:id/status", authMiddleware, requireRole("admin"), questionsController.updateStatus);
