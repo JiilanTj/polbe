@@ -7,15 +7,29 @@ import { redis } from "../../lib/redis";
 
 // Refresh token TTL in seconds (7 days)
 const REFRESH_TTL = 60 * 60 * 24 * 7;
+// Auto-recovery interval: 6 jam dari sekarang
+const RECOVERY_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 function refreshTokenKey(userId: number, tokenId: string) {
   return `refresh:${userId}:${tokenId}`;
 }
 
+function generateReferralCode(): string {
+  // 8-char alphanumeric uppercase
+  return Math.random().toString(36).substring(2, 6).toUpperCase() +
+         Math.random().toString(36).substring(2, 6).toUpperCase();
+}
+
 export const authController = {
   async register(c: Context) {
-    const body = await c.req.json<{ email: string; username: string; password: string; role?: string }>();
-    const { email, username, password, role } = body;
+    const body = await c.req.json<{
+      email: string;
+      username: string;
+      password: string;
+      role?: string;
+      referralCode?: string;
+    }>();
+    const { email, username, password, role, referralCode } = body;
 
     if (!email || !username || !password) {
       return c.json({ error: "Email, username, and password are required" }, 400);
@@ -41,12 +55,54 @@ export const authController = {
     const allowedRoles = ["user", "platform"] as const;
     const assignedRole = allowedRoles.includes(role as any) ? (role as "user" | "platform") : "user";
 
+    // Resolve referral code → referrer user ID
+    let referredById: number | null = null;
+    if (referralCode) {
+      const [referrer] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.referralCode, referralCode.toUpperCase()));
+      if (referrer) referredById = referrer.id;
+    }
+
     const passwordHash = await Bun.password.hash(password, { algorithm: "bcrypt", cost: 12 });
+
+    // Generate unique referral code (retry on rare collision)
+    let newReferralCode = generateReferralCode();
+    let retries = 0;
+    while (retries < 5) {
+      const [collision] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.referralCode, newReferralCode));
+      if (!collision) break;
+      newReferralCode = generateReferralCode();
+      retries++;
+    }
+
+    const recoveryAt = new Date(Date.now() + RECOVERY_INTERVAL_MS);
 
     const [user] = await db
       .insert(users)
-      .values({ email: email.toLowerCase(), username, passwordHash, role: assignedRole })
-      .returning({ id: users.id, email: users.email, username: users.username, role: users.role, createdAt: users.createdAt });
+      .values({
+        email: email.toLowerCase(),
+        username,
+        passwordHash,
+        role: assignedRole,
+        livesBalance: 5,           // 5 nyawa gratis untuk akun baru
+        livesRecoveryAt: recoveryAt,
+        referralCode: newReferralCode,
+        referredBy: referredById ?? undefined,
+      })
+      .returning({
+        id: users.id,
+        email: users.email,
+        username: users.username,
+        role: users.role,
+        livesBalance: users.livesBalance,
+        referralCode: users.referralCode,
+        createdAt: users.createdAt,
+      });
 
     return c.json({ message: "Registration successful", data: user }, 201);
   },

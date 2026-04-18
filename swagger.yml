@@ -24,6 +24,14 @@ tags:
     description: AI-generated Polymarket-style prediction questions
   - name: Scrape
     description: Manual scraping triggers
+  - name: Packages
+    description: Paket pembelian nyawa (lives)
+  - name: Topup
+    description: Request topup nyawa via transfer USDT manual
+  - name: Withdrawal
+    description: Request penarikan USDT
+  - name: Polls
+    description: Multi-option prediction polls berbasis nyawa
 
 paths:
   # ─── Auth ──────────────────────────────────────────────
@@ -54,6 +62,10 @@ paths:
                   type: string
                   enum: [user, platform]
                   default: user
+                referralCode:
+                  type: string
+                  description: Kode referral dari user yang mengundang (opsional)
+                  example: ABCD1234
       responses:
         "201":
           description: User registered successfully
@@ -659,6 +671,820 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  # ─── Packages ─────────────────────────────────────────
+  /api/packages:
+    get:
+      tags: [Packages]
+      summary: Daftar paket nyawa (publik)
+      description: Mengembalikan semua paket nyawa yang aktif, diurutkan dari harga terkecil.
+      responses:
+        "200":
+          description: Daftar paket nyawa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/LifePackage"
+
+    post:
+      tags: [Packages]
+      summary: Tambah paket nyawa baru
+      description: Hanya **admin** yang bisa menambah paket.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label, usdtPrice, livesAmount]
+              properties:
+                label:
+                  type: string
+                  example: Ultra
+                usdtPrice:
+                  type: string
+                  example: "200"
+                livesAmount:
+                  type: integer
+                  example: 400
+                sortOrder:
+                  type: integer
+                  example: 7
+      responses:
+        "201":
+          description: Paket berhasil dibuat
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/LifePackage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/packages/seed:
+    post:
+      tags: [Packages]
+      summary: Seed 6 paket default
+      description: |
+        Insert 6 paket default sesuai spec (1/5/10/50/100/500 USDT).
+        Sudah ada tidak akan di-insert ulang (`onConflictDoNothing`).
+        Hanya **admin**.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Seed berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Seeded 6 packages
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/LifePackage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/packages/{id}/toggle:
+    patch:
+      tags: [Packages]
+      summary: Toggle aktif/nonaktif paket
+      description: Hanya **admin**. Membalik nilai `isActive`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Status paket diperbarui
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/LifePackage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ─── Topup ─────────────────────────────────────────────
+  /api/topup:
+    post:
+      tags: [Topup]
+      summary: Buat request topup nyawa
+      description: |
+        User mengirim bukti transfer USDT (URL gambar) bersama `packageId`.
+        Request akan berstatus **pending** hingga admin menyetujui.
+        Setelah disetujui, nyawa otomatis dikreditkan dan referrer (jika ada) mendapat
+        komisi `floor(usdtAmount × 0.05)` nyawa.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [packageId, proofImageUrl]
+              properties:
+                packageId:
+                  type: integer
+                  description: ID paket nyawa yang dibeli
+                  example: 3
+                proofImageUrl:
+                  type: string
+                  format: uri
+                  description: URL bukti transfer USDT
+                  example: https://cdn.example.com/proofs/tx123.jpg
+                walletAddress:
+                  type: string
+                  description: Alamat wallet pengirim (opsional, untuk verifikasi)
+                  example: TKxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+      responses:
+        "201":
+          description: Request topup berhasil dikirim
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Request topup berhasil dikirim. Menunggu konfirmasi admin.
+                  data:
+                    $ref: "#/components/schemas/TopupRequest"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+    get:
+      tags: [Topup]
+      summary: Daftar request topup
+      description: |
+        **User biasa**: hanya melihat request milik sendiri.
+        **Admin**: melihat semua request.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        "200":
+          description: Daftar request topup
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TopupRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/topup/{id}/approve:
+    patch:
+      tags: [Topup]
+      summary: Approve request topup
+      description: |
+        Hanya **admin**. Mengkreditkan nyawa ke user, mencatat `livesTransaction`,
+        dan memberi komisi referral ke referrer jika ada.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                adminNote:
+                  type: string
+                  example: Transfer dikonfirmasi
+      responses:
+        "200":
+          description: Topup disetujui, nyawa dikreditkan
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Topup disetujui. User #3 mendapat 15 nyawa (saldo baru: 20)"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Request sudah diproses sebelumnya
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/topup/{id}/reject:
+    patch:
+      tags: [Topup]
+      summary: Reject request topup
+      description: Hanya **admin**.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                adminNote:
+                  type: string
+                  example: Bukti transfer tidak valid
+      responses:
+        "200":
+          description: Request ditolak
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Request sudah diproses sebelumnya
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ─── Withdrawal ────────────────────────────────────────
+  /api/withdrawal:
+    post:
+      tags: [Withdrawal]
+      summary: Buat request penarikan USDT
+      description: |
+        User meminta penarikan saldo USDT ke alamat wallet mereka.
+        Minimum withdrawal **1 USDT**. Request menunggu konfirmasi admin.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [usdtAmount, walletAddress]
+              properties:
+                usdtAmount:
+                  type: number
+                  minimum: 1
+                  example: 25.00
+                walletAddress:
+                  type: string
+                  description: Alamat USDT (TRC-20/ERC-20) tujuan
+                  example: TKxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+      responses:
+        "201":
+          description: Request withdrawal berhasil dikirim
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  data:
+                    $ref: "#/components/schemas/WithdrawalRequest"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+    get:
+      tags: [Withdrawal]
+      summary: Daftar request withdrawal
+      description: |
+        **User biasa**: hanya melihat request milik sendiri.
+        **Admin**: melihat semua request.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        "200":
+          description: Daftar request withdrawal
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WithdrawalRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/withdrawal/{id}/approve:
+    patch:
+      tags: [Withdrawal]
+      summary: Approve request withdrawal
+      description: Hanya **admin**. Isi `txHash` sebagai bukti transfer.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                txHash:
+                  type: string
+                  description: Hash transaksi blockchain
+                  example: 0xabc123...
+                adminNote:
+                  type: string
+      responses:
+        "200":
+          description: Withdrawal disetujui
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  data:
+                    $ref: "#/components/schemas/WithdrawalRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Request sudah diproses
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/withdrawal/{id}/reject:
+    patch:
+      tags: [Withdrawal]
+      summary: Reject request withdrawal
+      description: Hanya **admin**.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                adminNote:
+                  type: string
+      responses:
+        "200":
+          description: Withdrawal ditolak
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Request sudah diproses
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ─── Polls ─────────────────────────────────────────────
+  /api/polls:
+    get:
+      tags: [Polls]
+      summary: Daftar poll (publik)
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, active, resolved, closed]
+        - name: category
+          in: query
+          schema:
+            type: string
+            example: crypto
+      responses:
+        "200":
+          description: Daftar poll dengan pagination
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Poll"
+                  pagination:
+                    $ref: "#/components/schemas/Pagination"
+
+    post:
+      tags: [Polls]
+      summary: Buat poll baru
+      description: Hanya **admin** atau **platform**.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePollBody"
+      responses:
+        "201":
+          description: Poll berhasil dibuat (status awal = draft)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Poll"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/polls/{id}:
+    get:
+      tags: [Polls]
+      summary: Detail poll + distribusi suara
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Detail poll beserta distribusi suara per opsi
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    allOf:
+                      - $ref: "#/components/schemas/Poll"
+                      - type: object
+                        properties:
+                          distribution:
+                            type: array
+                            description: Jumlah suara dan nyawa per opsi
+                            items:
+                              type: object
+                              properties:
+                                index:
+                                  type: integer
+                                label:
+                                  type: string
+                                votes:
+                                  type: integer
+                                totalLives:
+                                  type: integer
+                          totalVotes:
+                            type: integer
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/polls/{id}/vote:
+    post:
+      tags: [Polls]
+      summary: Vote pada poll
+      description: |
+        Mendebit `livesPerVote` nyawa dari akun user dan merekam pilihan.
+        **Satu vote per user per poll** (unique constraint di DB).
+        Poll harus berstatus `active`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [optionIndex]
+              properties:
+                optionIndex:
+                  type: integer
+                  description: Index opsi yang dipilih (0-based)
+                  example: 0
+      responses:
+        "201":
+          description: Vote berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Vote berhasil! Kamu memilih: Bitcoin"
+                  data:
+                    $ref: "#/components/schemas/PollVote"
+        "400":
+          description: Nyawa tidak cukup atau poll tidak aktif
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: User sudah vote di poll ini
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/polls/{id}/my-vote:
+    get:
+      tags: [Polls]
+      summary: Lihat vote saya pada poll ini
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Data vote user (null jika belum vote)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    nullable: true
+                    $ref: "#/components/schemas/PollVote"
+                  voted:
+                    type: boolean
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/polls/{id}/status:
+    patch:
+      tags: [Polls]
+      summary: Update status poll
+      description: |
+        Hanya **admin**. Mengubah status poll.
+        Poll yang sudah `resolved` atau `closed` tidak bisa diubah.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [draft, active, resolved, closed]
+                  example: active
+      responses:
+        "200":
+          description: Status berhasil diubah
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Poll"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Poll sudah resolved/closed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/polls/{id}/resolve:
+    patch:
+      tags: [Polls]
+      summary: Resolve poll + distribusi payout nyawa
+      description: |
+        Hanya **admin**. Menentukan opsi pemenang dan mendistribusikan nyawa secara otomatis.
+
+        **Formula payout:**
+        ```
+        extra_per_winner = (total_loser_lives × (1 - platformFeePercent/100)) / total_winner_lives
+        payout_per_winner = lives_wagered + floor(lives_wagered × extra_per_winner)
+        platform_fee = floor(total_loser_lives × platformFeePercent/100)
+        ```
+        Default `platformFeePercent = 30` → winners dapat 70% dari nyawa yang kalah.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [winnerOptionIndex]
+              properties:
+                winnerOptionIndex:
+                  type: integer
+                  description: Index opsi pemenang (0-based)
+                  example: 1
+      responses:
+        "200":
+          description: Poll resolved, payout terdistribusi
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Poll #5 resolved! Pemenang: \"Ethereum\""
+                  summary:
+                    type: object
+                    properties:
+                      winnerOption:
+                        type: string
+                      totalVoters:
+                        type: integer
+                      winners:
+                        type: integer
+                      losers:
+                        type: integer
+                      totalLoserLives:
+                        type: integer
+                      winnerPoolLives:
+                        type: integer
+                      platformLives:
+                        type: integer
+                      extraPerWinner:
+                        type: string
+                        example: "0.7000"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Poll sudah resolved atau closed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
   # ─── Scrape ────────────────────────────────────────────
   /api/scrape/trigger:
     post:
@@ -985,9 +1811,266 @@ components:
         isActive:
           type: boolean
           example: true
+        livesBalance:
+          type: integer
+          description: Saldo nyawa saat ini
+          example: 5
+        livesRecoveryAt:
+          type: string
+          format: date-time
+          description: Waktu recovery nyawa berikutnya (+1 setiap 6 jam)
+        referralCode:
+          type: string
+          description: Kode referral unik user
+          example: ABCD1234
+        referredBy:
+          type: integer
+          nullable: true
+          description: ID user yang mereferensikan
         createdAt:
           type: string
           format: date-time
+
+    LifePackage:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 3
+        label:
+          type: string
+          example: Value
+        usdtPrice:
+          type: string
+          description: Harga dalam USDT
+          example: "10"
+        livesAmount:
+          type: integer
+          description: Jumlah nyawa yang didapat
+          example: 15
+        isActive:
+          type: boolean
+          example: true
+        sortOrder:
+          type: integer
+          example: 3
+
+    TopupRequest:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+        packageId:
+          type: integer
+          nullable: true
+        usdtAmount:
+          type: string
+          example: "10"
+        livesAmount:
+          type: integer
+          example: 15
+        proofImageUrl:
+          type: string
+          format: uri
+        walletAddress:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+          example: pending
+        adminNote:
+          type: string
+          nullable: true
+        approvedBy:
+          type: integer
+          nullable: true
+        processedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    WithdrawalRequest:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+        usdtAmount:
+          type: string
+          example: "25.00"
+        walletAddress:
+          type: string
+          example: TKxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+        txHash:
+          type: string
+          nullable: true
+          description: Hash transaksi blockchain (diisi saat approved)
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+        adminNote:
+          type: string
+          nullable: true
+        approvedBy:
+          type: integer
+          nullable: true
+        processedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    Poll:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+          example: Mana yang akan lebih tinggi akhir April 2026?
+        description:
+          type: string
+          nullable: true
+        category:
+          type: string
+          nullable: true
+          example: crypto
+        options:
+          type: array
+          description: Daftar opsi jawaban (minimal 2, maksimal 10)
+          items:
+            type: string
+          example: ["Bitcoin", "Ethereum", "Solana"]
+        imageUrl:
+          type: string
+          format: uri
+          nullable: true
+        status:
+          type: string
+          enum: [draft, active, resolved, closed]
+          example: active
+        creatorId:
+          type: integer
+        aiGenerated:
+          type: boolean
+        winnerOptionIndex:
+          type: integer
+          nullable: true
+          description: Index opsi pemenang (diisi saat resolved)
+        resolvedAt:
+          type: string
+          format: date-time
+          nullable: true
+        resolvedBy:
+          type: integer
+          nullable: true
+        startAt:
+          type: string
+          format: date-time
+          nullable: true
+        endAt:
+          type: string
+          format: date-time
+          nullable: true
+        livesPerVote:
+          type: integer
+          description: Nyawa yang dibutuhkan untuk 1 vote
+          default: 1
+          example: 1
+        platformFeePercent:
+          type: string
+          description: Persentase fee platform dari nyawa yang kalah
+          default: "30"
+          example: "30"
+        totalVotes:
+          type: integer
+          example: 42
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    PollVote:
+      type: object
+      properties:
+        id:
+          type: integer
+        pollId:
+          type: integer
+        userId:
+          type: integer
+        optionIndex:
+          type: integer
+          description: Indeks opsi yang dipilih (0-based)
+          example: 1
+        livesWagered:
+          type: integer
+          description: Jumlah nyawa yang dipertaruhkan
+          example: 1
+        payoutLives:
+          type: string
+          nullable: true
+          description: Nyawa yang diterima setelah resolusi (null sebelum resolved)
+          example: "1.7000"
+        createdAt:
+          type: string
+          format: date-time
+
+    CreatePollBody:
+      type: object
+      required: [title, options]
+      properties:
+        title:
+          type: string
+          example: Mana yang akan lebih tinggi akhir April 2026?
+        description:
+          type: string
+        category:
+          type: string
+          example: crypto
+        options:
+          type: array
+          minItems: 2
+          maxItems: 10
+          items:
+            type: string
+          example: ["Bitcoin", "Ethereum", "Solana"]
+        imageUrl:
+          type: string
+          format: uri
+        startAt:
+          type: string
+          format: date-time
+        endAt:
+          type: string
+          format: date-time
+        livesPerVote:
+          type: integer
+          default: 1
+          minimum: 1
+        platformFeePercent:
+          type: number
+          minimum: 0
+          maximum: 100
+          default: 30
+        sourceArticleIds:
+          type: array
+          items:
+            type: integer
+        aiGenerated:
+          type: boolean
+          default: false
 
     Error:
       type: object
@@ -995,6 +2078,38 @@ components:
         error:
           type: string
           example: "Not found"
+
+  responses:
+    BadRequest:
+      description: Body tidak valid
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Missing atau invalid access token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Role tidak memiliki akses
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Resource tidak ditemukan
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    UnprocessableEntity:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
 
   securitySchemes:
     bearerAuth:

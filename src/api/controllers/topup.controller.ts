@@ -1,0 +1,202 @@
+import type { Context } from "hono";
+import { db } from "../../db";
+import { topupRequests, lifePackages, users, livesTransactions, referralEarnings } from "../../db/schema";
+import { eq, desc } from "drizzle-orm";
+import type { TokenPayload } from "../../lib/jwt";
+
+// Referral fee rate: 0.05 USDT per 1 USDT topup downline
+const REFERRAL_FEE_RATE = 0.05;
+// 1 USDT = 1 live untuk konversi referral bonus
+const USDT_TO_LIVES = 1;
+
+async function creditLives(
+  userId: number,
+  amount: number,
+  type: "purchase" | "referral_bonus" | "admin_credit",
+  refId: number | null,
+  refType: string,
+  note: string,
+) {
+  const [current] = await db
+    .select({ livesBalance: users.livesBalance })
+    .from(users)
+    .where(eq(users.id, userId));
+
+  if (!current) throw new Error("User tidak ditemukan");
+
+  const balanceAfter = current.livesBalance + amount;
+
+  await db.update(users).set({ livesBalance: balanceAfter }).where(eq(users.id, userId));
+
+  await db.insert(livesTransactions).values({
+    userId,
+    amount,
+    type,
+    refId,
+    refType,
+    note,
+    balanceAfter,
+  });
+
+  return balanceAfter;
+}
+
+export const topupController = {
+  // POST /api/topup — user buat request topup
+  async create(c: Context) {
+    const me = c.get("user") as TokenPayload;
+    const body = await c.req.json().catch(() => null);
+    if (!body) return c.json({ error: "Body tidak valid" }, 400);
+
+    const { packageId, proofImageUrl, walletAddress } = body as Record<string, any>;
+
+    if (!packageId) return c.json({ error: "Field 'packageId' wajib diisi" }, 422);
+    if (!proofImageUrl) return c.json({ error: "Field 'proofImageUrl' (URL bukti transfer) wajib diisi" }, 422);
+
+    // Ambil paket
+    const [pkg] = await db
+      .select()
+      .from(lifePackages)
+      .where(eq(lifePackages.id, Number(packageId)));
+
+    if (!pkg) return c.json({ error: "Paket tidak ditemukan" }, 404);
+    if (!pkg.isActive) return c.json({ error: "Paket sedang tidak aktif" }, 400);
+
+    const [request] = await db
+      .insert(topupRequests)
+      .values({
+        userId: Number(me.sub),
+        packageId: pkg.id,
+        usdtAmount: pkg.usdtPrice,
+        livesAmount: pkg.livesAmount,
+        proofImageUrl,
+        walletAddress: walletAddress ?? null,
+        status: "pending",
+      })
+      .returning();
+
+    return c.json({
+      message: "Request topup berhasil dikirim. Menunggu konfirmasi admin.",
+      data: request,
+    }, 201);
+  },
+
+  // GET /api/topup — user lihat history topup mereka; admin lihat semua
+  async list(c: Context) {
+    const me = c.get("user") as TokenPayload;
+    const isAdmin = me.role === "admin";
+    const page = Number(c.req.query("page") || "1");
+    const limit = Math.min(Number(c.req.query("limit") || "20"), 100);
+    const offset = (page - 1) * limit;
+
+    let query = db
+      .select()
+      .from(topupRequests)
+      .orderBy(desc(topupRequests.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    // User biasa hanya lihat milik sendiri
+    if (!isAdmin) {
+      query = query.where(eq(topupRequests.userId, Number(me.sub))) as typeof query;
+    }
+
+    const rows = await query;
+    return c.json({ data: rows });
+  },
+
+  // PATCH /api/topup/:id/approve — admin approve
+  async approve(c: Context) {
+    const me = c.get("user") as TokenPayload;
+    const id = Number(c.req.param("id"));
+    const body = await c.req.json().catch(() => ({})) as { adminNote?: string };
+
+    const [req] = await db.select().from(topupRequests).where(eq(topupRequests.id, id));
+    if (!req) return c.json({ error: "Request tidak ditemukan" }, 404);
+    if (req.status !== "pending") {
+      return c.json({ error: `Request sudah ${req.status}, tidak bisa diubah` }, 409);
+    }
+
+    // Update status topup
+    await db
+      .update(topupRequests)
+      .set({
+        status: "approved",
+        adminNote: body.adminNote ?? null,
+        approvedBy: Number(me.sub),
+        processedAt: new Date(),
+      })
+      .where(eq(topupRequests.id, id));
+
+    // Credit lives ke user
+    const newBalance = await creditLives(
+      req.userId,
+      req.livesAmount,
+      "purchase",
+      req.id,
+      "topup_request",
+      `Topup ${req.livesAmount} nyawa (${req.usdtAmount} USDT) — approved`,
+    );
+
+    // ─── Referral: beri komisi ke referrer ──────────────────────────
+    const [buyer] = await db
+      .select({ referredBy: users.referredBy })
+      .from(users)
+      .where(eq(users.id, req.userId));
+
+    if (buyer?.referredBy) {
+      const referrerId = buyer.referredBy;
+      const usdtEarned = Number(req.usdtAmount) * REFERRAL_FEE_RATE;
+      const livesEarned = Math.floor(usdtEarned * USDT_TO_LIVES);
+
+      await db.insert(referralEarnings).values({
+        referrerId,
+        refereeId: req.userId,
+        topupRequestId: req.id,
+        usdtEarned: String(usdtEarned.toFixed(2)),
+        livesEarned,
+      });
+
+      // Credit lives referral bonus (hanya jika livesEarned >= 1)
+      if (livesEarned >= 1) {
+        await creditLives(
+          referrerId,
+          livesEarned,
+          "referral_bonus",
+          req.id,
+          "topup_request",
+          `Komisi referral dari topup user #${req.userId}`,
+        );
+      }
+    }
+
+    return c.json({
+      message: `Topup disetujui. User #${req.userId} mendapat ${req.livesAmount} nyawa (saldo baru: ${newBalance})`,
+    });
+  },
+
+  // PATCH /api/topup/:id/reject — admin reject
+  async reject(c: Context) {
+    const me = c.get("user") as TokenPayload;
+    const id = Number(c.req.param("id"));
+    const body = await c.req.json().catch(() => ({})) as { adminNote?: string };
+
+    const [req] = await db.select().from(topupRequests).where(eq(topupRequests.id, id));
+    if (!req) return c.json({ error: "Request tidak ditemukan" }, 404);
+    if (req.status !== "pending") {
+      return c.json({ error: `Request sudah ${req.status}, tidak bisa diubah` }, 409);
+    }
+
+    await db
+      .update(topupRequests)
+      .set({
+        status: "rejected",
+        adminNote: body.adminNote ?? null,
+        approvedBy: Number(me.sub),
+        processedAt: new Date(),
+      })
+      .where(eq(topupRequests.id, id));
+
+    return c.json({ message: `Topup #${id} ditolak` });
+  },
+};

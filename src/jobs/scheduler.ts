@@ -1,5 +1,6 @@
 import cron from "node-cron";
 import { config } from "../config";
+import { runLivesRecovery } from "./lives-recovery";
 import { scrapeRssFeeds, saveArticles } from "../scrapers/rss";
 import { scrapeNewsApi } from "../scrapers/newsapi";
 import { scrapeArticleContent } from "../scrapers/content";
@@ -166,6 +167,13 @@ export function startScheduler() {
 
   // Run once immediately on start
   runScrapeJob().catch((err) => console.error("[Scheduler] Initial job failed:", err));
+
+  // Auto-recovery nyawa: +1 setiap 6 jam
+  cron.schedule("0 */6 * * *", () => {
+    runLivesRecovery().catch((err) => console.error("[LivesRecovery] Job gagal:", err));
+  });
+
+  console.log("[Scheduler] Lives recovery job dijadwalkan setiap 6 jam.");
 }
 
 export { runScrapeJob };
