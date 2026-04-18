@@ -1272,6 +1272,43 @@ paths:
                             type: integer
         "404":
           $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Polls]
+      summary: Hapus poll (hanya bisa saat status draft)
+      description: Hanya **admin**. Poll yang sudah `active`, `resolved`, atau `closed` tidak bisa dihapus.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Poll berhasil dihapus
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Poll berhasil dihapus"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Poll tidak bisa dihapus karena bukan draft
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /api/polls/{id}/vote:
     post:
@@ -1908,26 +1945,6 @@ paths:
                               type: integer
                               example: 8
 
-  # ─── Poll Delete ───────────────────────────────────────────
-  /api/polls/{id}:
-    delete:
-      tags: [Polls]
-      summary: Hapus poll (hanya bisa saat status draft)
-      security:
-        - bearerAuth: []
-      parameters:
-        - in: path
-          name: id
-          required: true
-          schema: { type: integer }
-      responses:
-        "200":
-          description: Poll berhasil dihapus
-        "404":
-          description: Poll tidak ditemukan
-        "409":
-          description: Poll tidak bisa dihapus karena bukan draft
-
 components:
   schemas:
     Article:
@@ -2501,18 +2518,6 @@ components:
         error:
           type: string
           example: "Not found"
-
-    Pagination:
-      type: object
-      properties:
-        total:
-          type: integer
-        page:
-          type: integer
-        limit:
-          type: integer
-        totalPages:
-          type: integer
 
     UserProfile:
       type: object
