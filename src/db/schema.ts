@@ -15,6 +15,7 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   role: roleEnum("role").default("user").notNull(),
   isActive: boolean("is_active").default(true).notNull(),
+  avatarUrl: text("avatar_url"),
   // ─── Lives ────────────────────────────────────────────
   livesBalance: integer("lives_balance").default(5).notNull(),
   livesRecoveryAt: timestamp("lives_recovery_at").defaultNow().notNull(),

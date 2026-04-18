@@ -1,10 +1,11 @@
 import { Hono } from "hono";
 import { adminController } from "../controllers/admin.controller";
 import { authMiddleware, requireRole } from "../middlewares/auth.middleware";
+import { defaultRateLimit } from "../middlewares/rate-limit.middleware";
 
 export const adminRoutes = new Hono();
 
-adminRoutes.use("/*", authMiddleware, requireRole("admin"));
+adminRoutes.use("/*", authMiddleware, requireRole("admin"), defaultRateLimit);
 
 adminRoutes.get("/users", adminController.listUsers);
 adminRoutes.get("/users/:id", adminController.getUser);

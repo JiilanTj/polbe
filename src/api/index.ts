@@ -13,11 +13,13 @@ import { adminRoutes } from "./routes/admin.routes";
 import { leaderboardRoutes } from "./routes/leaderboard.routes";
 import { uploadRoutes } from "./routes/upload.routes";
 import { defaultRateLimit } from "./middlewares/rate-limit.middleware";
+import { loggerMiddleware } from "./middlewares/logger.middleware";
 
 export function registerRoutes(app: Hono) {
   const api = new Hono();
 
-  // Global rate limit
+  // Logger + Global rate limit
+  api.use("/*", loggerMiddleware);
   api.use("/*", defaultRateLimit);
 
   api.route("/auth", authRoutes);

@@ -22,6 +22,10 @@ export const config = {
   server: {
     port: Number(process.env.PORT) || 3000,
   },
+  cors: {
+    // Pisahkan dengan koma jika lebih dari satu: "http://localhost:5173,https://app.example.com"
+    origin: (process.env.CORS_ORIGIN || "*").split(",").map((s) => s.trim()),
+  },
   scraping: {
     intervalMinutes: Number(process.env.SCRAPE_INTERVAL_MINUTES) || 15,
   },

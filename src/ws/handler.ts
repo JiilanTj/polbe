@@ -2,9 +2,13 @@ import type { ServerWebSocket } from "bun";
 
 interface WsData {
   subscriptions: Set<string>;
+  pingInterval?: ReturnType<typeof setInterval>;
 }
 
 const clients = new Set<ServerWebSocket<WsData>>();
+
+// Interval ping ke semua client setiap 30 detik supaya koneksi idle tidak terputus
+const PING_INTERVAL_MS = 30_000;
 
 export const wsHandler = {
   open(ws: ServerWebSocket<WsData>) {
@@ -12,6 +16,16 @@ export const wsHandler = {
     clients.add(ws);
     console.log(`[WS] Client connected. Total: ${clients.size}`);
     ws.send(JSON.stringify({ event: "connected", data: { message: "Connected to Polymarket WS" } }));
+
+    // Mulai heartbeat ping
+    ws.data.pingInterval = setInterval(() => {
+      try {
+        ws.send(JSON.stringify({ event: "ping" }));
+      } catch {
+        clearInterval(ws.data.pingInterval);
+        clients.delete(ws);
+      }
+    }, PING_INTERVAL_MS);
   },
 
   message(ws: ServerWebSocket<WsData>, message: string | Buffer) {
@@ -33,12 +47,18 @@ export const wsHandler = {
         ws.data.subscriptions.add(`user:${msg.userId}`);
         ws.send(JSON.stringify({ event: "auth:ok", data: { userId: msg.userId } }));
       }
+
+      // Balas pong dari client (client bisa juga kirim pong sebagai keepalive)
+      if (msg.event === "pong") {
+        // Heartbeat confirmed — tidak perlu tindakan apapun
+      }
     } catch {
       // Ignore invalid messages
     }
   },
 
   close(ws: ServerWebSocket<WsData>) {
+    clearInterval(ws.data.pingInterval);
     clients.delete(ws);
     console.log(`[WS] Client disconnected. Total: ${clients.size}`);
   },

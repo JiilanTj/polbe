@@ -4,6 +4,8 @@ import { users } from "../../db/schema";
 import { eq } from "drizzle-orm";
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../../lib/jwt";
 import { redis } from "../../lib/redis";
+import { parseBody } from "../../lib/validate";
+import { registerSchema, loginSchema } from "../../lib/schemas";
 
 // Refresh token TTL in seconds (7 days)
 const REFRESH_TTL = 60 * 60 * 24 * 7;
@@ -22,38 +24,20 @@ function generateReferralCode(): string {
 
 export const authController = {
   async register(c: Context) {
-    const body = await c.req.json<{
-      email: string;
-      username: string;
-      password: string;
-      role?: string;
-      referralCode?: string;
-    }>();
-    const { email, username, password, role, referralCode } = body;
+    const body = await parseBody(c, registerSchema);
+    if (body instanceof Response) return body;
 
-    if (!email || !username || !password) {
-      return c.json({ error: "Email, username, and password are required" }, 400);
-    }
-
-    // Basic email format validation
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return c.json({ error: "Invalid email format" }, 400);
-    }
-
-    if (password.length < 8) {
-      return c.json({ error: "Password must be at least 8 characters" }, 400);
-    }
+    const { email, username, password, referralCode } = body;
 
     // Check duplicates
     const [existingEmail] = await db.select({ id: users.id }).from(users).where(eq(users.email, email.toLowerCase()));
-    if (existingEmail) return c.json({ error: "Email already registered" }, 409);
+    if (existingEmail) return c.json({ error: "Email sudah terdaftar" }, 409);
 
     const [existingUsername] = await db.select({ id: users.id }).from(users).where(eq(users.username, username));
-    if (existingUsername) return c.json({ error: "Username already taken" }, 409);
+    if (existingUsername) return c.json({ error: "Username sudah dipakai" }, 409);
 
-    // Only allow specific roles on registration (prevent self-escalation)
-    const allowedRoles = ["user", "platform"] as const;
-    const assignedRole = allowedRoles.includes(role as any) ? (role as "user" | "platform") : "user";
+    // Role selalu "user" — tidak bisa di-set dari luar
+    const assignedRole = "user" as const;
 
     // Resolve referral code → referrer user ID
     let referredById: number | null = null;
@@ -104,21 +88,19 @@ export const authController = {
         createdAt: users.createdAt,
       });
 
-    return c.json({ message: "Registration successful", data: user }, 201);
+    return c.json({ message: "Registrasi berhasil", data: user }, 201);
   },
 
   async login(c: Context) {
-    const body = await c.req.json<{ email: string; password: string }>();
-    const { email, password } = body;
+    const body = await parseBody(c, loginSchema);
+    if (body instanceof Response) return body;
 
-    if (!email || !password) {
-      return c.json({ error: "Email and password are required" }, 400);
-    }
+    const { email, password } = body;
 
     const [user] = await db.select().from(users).where(eq(users.email, email.toLowerCase()));
 
-    if (!user) return c.json({ error: "Invalid email or password" }, 401);
-    if (!user.isActive) return c.json({ error: "Account is deactivated" }, 403);
+    if (!user) return c.json({ error: "Email atau password salah" }, 401);
+    if (!user.isActive) return c.json({ error: "Akun telah dinonaktifkan" }, 403);
 
     const validPassword = await Bun.password.verify(password, user.passwordHash);
     if (!validPassword) return c.json({ error: "Invalid email or password" }, 401);

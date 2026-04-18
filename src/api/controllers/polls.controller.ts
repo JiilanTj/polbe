@@ -4,6 +4,8 @@ import { polls, pollVotes, users, livesTransactions } from "../../db/schema";
 import { eq, desc, sql, and } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { broadcastEvent } from "../../ws/handler";
+import { parseBody, safeInt } from "../../lib/validate";
+import { pollCreateSchema, pollVoteSchema, pollResolveSchema, pollStatusSchema } from "../../lib/schemas";
 
 // ─── Helper: kredit/debit nyawa + catat transaksi ──────────────────────────
 async function adjustLives(
@@ -90,29 +92,17 @@ export const pollsController = {
   // POST /api/polls — admin/platform buat poll
   async create(c: Context) {
     const me = c.get("user") as TokenPayload;
-    const body = await c.req.json().catch(() => null);
-    if (!body) return c.json({ error: "Body tidak valid" }, 400);
+    const body = await parseBody(c, pollCreateSchema);
+    if (body instanceof Response) return body;
 
     const {
       title, description, category, options, imageUrl,
       startAt, endAt, livesPerVote, platformFeePercent,
       sourceArticleIds, aiGenerated,
-    } = body as Record<string, any>;
+    } = body;
 
-    if (!title?.trim()) return c.json({ error: "Field 'title' wajib diisi" }, 422);
-    if (!Array.isArray(options) || options.length < 2) {
-      return c.json({ error: "Minimal 2 opsi diperlukan" }, 422);
-    }
-    if (options.length > 10) {
-      return c.json({ error: "Maksimal 10 opsi" }, 422);
-    }
     if (startAt && endAt && new Date(startAt) >= new Date(endAt)) {
       return c.json({ error: "startAt harus sebelum endAt" }, 422);
-    }
-
-    const feePercent = Number(platformFeePercent ?? 30);
-    if (feePercent < 0 || feePercent > 100) {
-      return c.json({ error: "platformFeePercent harus 0–100" }, 422);
     }
 
     const [poll] = await db
@@ -125,12 +115,12 @@ export const pollsController = {
         imageUrl: imageUrl ?? null,
         status: "draft",
         creatorId: Number(me.sub),
-        aiGenerated: Boolean(aiGenerated),
+        aiGenerated,
         sourceArticleIds: Array.isArray(sourceArticleIds) ? sourceArticleIds : null,
         startAt: startAt ? new Date(startAt) : null,
         endAt: endAt ? new Date(endAt) : null,
-        livesPerVote: Number(livesPerVote ?? 1),
-        platformFeePercent: String(feePercent),
+        livesPerVote,
+        platformFeePercent: String(platformFeePercent),
       })
       .returning();
 
@@ -139,15 +129,13 @@ export const pollsController = {
 
   // PATCH /api/polls/:id/status — admin ubah status (draft → active, dsb)
   async updateStatus(c: Context) {
-    const id = Number(c.req.param("id"));
-    const body = await c.req.json().catch(() => null);
-    if (!body) return c.json({ error: "Body tidak valid" }, 400);
+    const id = safeInt(c.req.param("id"));
+    if (!id) return c.json({ error: "ID poll tidak valid" }, 400);
 
-    const { status } = body as { status: string };
-    const VALID = ["draft", "active", "resolved", "closed"];
-    if (!VALID.includes(status)) {
-      return c.json({ error: `Status tidak valid. Pilihan: ${VALID.join(", ")}` }, 422);
-    }
+    const body = await parseBody(c, pollStatusSchema);
+    if (body instanceof Response) return body;
+
+    const { status } = body;
 
     const [poll] = await db.select().from(polls).where(eq(polls.id, id));
     if (!poll) return c.json({ error: "Poll tidak ditemukan" }, 404);
@@ -168,14 +156,13 @@ export const pollsController = {
   // POST /api/polls/:id/vote — user vote (costs livesPerVote nyawa)
   async vote(c: Context) {
     const me = c.get("user") as TokenPayload;
-    const pollId = Number(c.req.param("id"));
-    const body = await c.req.json().catch(() => null);
-    if (!body) return c.json({ error: "Body tidak valid" }, 400);
+    const pollId = safeInt(c.req.param("id"));
+    if (!pollId) return c.json({ error: "ID poll tidak valid" }, 400);
 
-    const { optionIndex } = body as { optionIndex?: number };
-    if (optionIndex === undefined || optionIndex === null) {
-      return c.json({ error: "Field 'optionIndex' wajib diisi" }, 422);
-    }
+    const body = await parseBody(c, pollVoteSchema);
+    if (body instanceof Response) return body;
+
+    const { optionIndex } = body;
 
     const [poll] = await db.select().from(polls).where(eq(polls.id, pollId));
     if (!poll) return c.json({ error: "Poll tidak ditemukan" }, 404);
@@ -241,14 +228,13 @@ export const pollsController = {
   // PATCH /api/polls/:id/resolve — admin tentukan pemenang + distribusi payout
   async resolve(c: Context) {
     const me = c.get("user") as TokenPayload;
-    const pollId = Number(c.req.param("id"));
-    const body = await c.req.json().catch(() => null);
-    if (!body) return c.json({ error: "Body tidak valid" }, 400);
+    const pollId = safeInt(c.req.param("id"));
+    if (!pollId) return c.json({ error: "ID poll tidak valid" }, 400);
 
-    const { winnerOptionIndex } = body as { winnerOptionIndex?: number };
-    if (winnerOptionIndex === undefined || winnerOptionIndex === null) {
-      return c.json({ error: "Field 'winnerOptionIndex' wajib diisi" }, 422);
-    }
+    const body = await parseBody(c, pollResolveSchema);
+    if (body instanceof Response) return body;
+
+    const { winnerOptionIndex } = body;
 
     const [poll] = await db.select().from(polls).where(eq(polls.id, pollId));
     if (!poll) return c.json({ error: "Poll tidak ditemukan" }, 404);
@@ -362,7 +348,8 @@ export const pollsController = {
   // GET /api/polls/:id/my-vote — user lihat vote sendiri
   async myVote(c: Context) {
     const me = c.get("user") as TokenPayload;
-    const pollId = Number(c.req.param("id"));
+    const pollId = safeInt(c.req.param("id"));
+    if (!pollId) return c.json({ error: "ID poll tidak valid" }, 400);
 
     const [vote] = await db
       .select()
@@ -371,5 +358,26 @@ export const pollsController = {
 
     if (!vote) return c.json({ data: null, voted: false });
     return c.json({ data: vote, voted: true });
+  },
+
+  // DELETE /api/polls/:id — admin hapus poll (hanya status draft)
+  async deletePoll(c: Context) {
+    const id = safeInt(c.req.param("id"));
+    if (!id) return c.json({ error: "ID poll tidak valid" }, 400);
+
+    const [poll] = await db
+      .select({ id: polls.id, status: polls.status })
+      .from(polls)
+      .where(eq(polls.id, id));
+
+    if (!poll) return c.json({ error: "Poll tidak ditemukan" }, 404);
+    if (poll.status !== "draft") {
+      return c.json({ error: "Hanya poll berstatus 'draft' yang bisa dihapus" }, 409);
+    }
+
+    await db.delete(pollVotes).where(eq(pollVotes.pollId, id));
+    await db.delete(polls).where(eq(polls.id, id));
+
+    return c.json({ message: `Poll #${id} berhasil dihapus` });
   },
 };

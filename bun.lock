@@ -17,6 +17,7 @@
         "openai": "^6.34.0",
         "postgres": "^3.4.9",
         "rss-parser": "^3.13.0",
+        "zod": "^4.3.6",
       },
       "devDependencies": {
         "@types/bun": "latest",

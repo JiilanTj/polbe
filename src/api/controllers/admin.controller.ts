@@ -3,6 +3,8 @@ import { db } from "../../db";
 import { users, livesTransactions } from "../../db/schema";
 import { eq, desc, ilike, sql, or } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
+import { parseBody, safeInt } from "../../lib/validate";
+import { adminCreditSchema, adminRoleSchema } from "../../lib/schemas";
 
 export const adminController = {
   // GET /api/admin/users — list semua user dengan filter
@@ -54,7 +56,8 @@ export const adminController = {
 
   // GET /api/admin/users/:id — detail user
   async getUser(c: Context) {
-    const id = Number(c.req.param("id"));
+    const id = safeInt(c.req.param("id"));
+    if (!id) return c.json({ error: "ID tidak valid" }, 400);
     const [user] = await db
       .select({
         id: users.id,
@@ -87,7 +90,8 @@ export const adminController = {
 
   // PATCH /api/admin/users/:id/toggle — aktifkan / nonaktifkan akun
   async toggleUser(c: Context) {
-    const id = Number(c.req.param("id"));
+    const id = safeInt(c.req.param("id"));
+    if (!id) return c.json({ error: "ID tidak valid" }, 400);
     const me = c.get("user") as TokenPayload;
 
     if (Number(me.sub) === id) {
@@ -114,19 +118,18 @@ export const adminController = {
   // POST /api/admin/users/:id/credit — manual kredit/debit nyawa
   async creditLives(c: Context) {
     const me = c.get("user") as TokenPayload;
-    const id = Number(c.req.param("id"));
-    const body = await c.req.json().catch(() => null);
-    if (!body) return c.json({ error: "Body tidak valid" }, 400);
+    const id = safeInt(c.req.param("id"));
+    if (!id) return c.json({ error: "ID user tidak valid" }, 400);
 
-    const { amount, note } = body as { amount?: number; note?: string };
-    if (amount === undefined || amount === 0) {
-      return c.json({ error: "Field 'amount' wajib diisi dan tidak boleh 0 (negatif = debit)" }, 422);
-    }
+    const body = await parseBody(c, adminCreditSchema);
+    if (body instanceof Response) return body;
+
+    const { amount, note } = body;
 
     const [user] = await db.select({ livesBalance: users.livesBalance, username: users.username }).from(users).where(eq(users.id, id));
     if (!user) return c.json({ error: "User tidak ditemukan" }, 404);
 
-    const newBalance = user.livesBalance + Number(amount);
+    const newBalance = user.livesBalance + amount;
     if (newBalance < 0) {
       return c.json({ error: `Saldo tidak cukup. Saldo saat ini: ${user.livesBalance}` }, 400);
     }
@@ -134,7 +137,7 @@ export const adminController = {
     await db.update(users).set({ livesBalance: newBalance, updatedAt: new Date() }).where(eq(users.id, id));
     await db.insert(livesTransactions).values({
       userId: id,
-      amount: Number(amount),
+      amount,
       type: amount > 0 ? "admin_credit" : "admin_debit",
       refId: Number(me.sub),
       refType: "admin_action",
@@ -150,15 +153,13 @@ export const adminController = {
   // PATCH /api/admin/users/:id/role — ubah role user
   async changeRole(c: Context) {
     const me = c.get("user") as TokenPayload;
-    const id = Number(c.req.param("id"));
-    const body = await c.req.json().catch(() => null);
-    if (!body) return c.json({ error: "Body tidak valid" }, 400);
+    const id = safeInt(c.req.param("id"));
+    if (!id) return c.json({ error: "ID user tidak valid" }, 400);
 
-    const { role } = body as { role?: string };
-    const VALID_ROLES = ["user", "admin", "platform"];
-    if (!role || !VALID_ROLES.includes(role)) {
-      return c.json({ error: `Role tidak valid. Pilihan: ${VALID_ROLES.join(", ")}` }, 422);
-    }
+    const body = await parseBody(c, adminRoleSchema);
+    if (body instanceof Response) return body;
+
+    const { role } = body;
 
     if (Number(me.sub) === id && role !== "admin") {
       return c.json({ error: "Tidak bisa mencopot role admin dari akun sendiri" }, 400);

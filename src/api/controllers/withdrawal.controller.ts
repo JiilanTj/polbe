@@ -4,31 +4,23 @@ import { withdrawalRequests } from "../../db/schema";
 import { eq, desc } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { broadcastEvent } from "../../ws/handler";
+import { parseBody, safeInt } from "../../lib/validate";
+import { withdrawalCreateSchema } from "../../lib/schemas";
 
 export const withdrawalController = {
   // POST /api/withdrawal — user minta tarik saldo
   async create(c: Context) {
     const me = c.get("user") as TokenPayload;
-    const body = await c.req.json().catch(() => null);
-    if (!body) return c.json({ error: "Body tidak valid" }, 400);
+    const body = await parseBody(c, withdrawalCreateSchema);
+    if (body instanceof Response) return body;
 
-    const { usdtAmount, walletAddress } = body as Record<string, any>;
-
-    if (!usdtAmount || Number(usdtAmount) <= 0) {
-      return c.json({ error: "Field 'usdtAmount' wajib > 0" }, 422);
-    }
-    if (!walletAddress?.trim()) {
-      return c.json({ error: "Field 'walletAddress' wajib diisi (alamat USDT tujuan)" }, 422);
-    }
-    if (Number(usdtAmount) < 1) {
-      return c.json({ error: "Minimum withdrawal 1 USDT" }, 422);
-    }
+    const { usdtAmount, walletAddress } = body;
 
     const [request] = await db
       .insert(withdrawalRequests)
       .values({
         userId: Number(me.sub),
-        usdtAmount: String(Number(usdtAmount).toFixed(2)),
+        usdtAmount: usdtAmount.toFixed(2),
         walletAddress: walletAddress.trim(),
         status: "pending",
       })
@@ -66,7 +58,8 @@ export const withdrawalController = {
   // PATCH /api/withdrawal/:id/approve — admin approve, isi txHash
   async approve(c: Context) {
     const me = c.get("user") as TokenPayload;
-    const id = Number(c.req.param("id"));
+    const id = safeInt(c.req.param("id"));
+    if (!id) return c.json({ error: "ID tidak valid" }, 400);
     const body = await c.req.json().catch(() => ({})) as { txHash?: string; adminNote?: string };
 
     const [req] = await db.select().from(withdrawalRequests).where(eq(withdrawalRequests.id, id));
@@ -103,7 +96,8 @@ export const withdrawalController = {
   // PATCH /api/withdrawal/:id/reject — admin reject
   async reject(c: Context) {
     const me = c.get("user") as TokenPayload;
-    const id = Number(c.req.param("id"));
+    const id = safeInt(c.req.param("id"));
+    if (!id) return c.json({ error: "ID tidak valid" }, 400);
     const body = await c.req.json().catch(() => ({})) as { adminNote?: string };
 
     const [req] = await db.select().from(withdrawalRequests).where(eq(withdrawalRequests.id, id));

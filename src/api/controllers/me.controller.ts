@@ -5,6 +5,8 @@ import {
 } from "../../db/schema";
 import { eq, desc, sql, and } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
+import { parseBody } from "../../lib/validate";
+import { updateProfileSchema } from "../../lib/schemas";
 
 export const meController = {
   // GET /api/me — profil + saldo nyawa + referral code
@@ -18,6 +20,7 @@ export const meController = {
         username: users.username,
         role: users.role,
         isActive: users.isActive,
+        avatarUrl: users.avatarUrl,
         livesBalance: users.livesBalance,
         livesRecoveryAt: users.livesRecoveryAt,
         referralCode: users.referralCode,
@@ -51,13 +54,13 @@ export const meController = {
     });
   },
 
-  // PATCH /api/me — update username atau password
+  // PATCH /api/me — update username, avatarUrl, atau password
   async updateProfile(c: Context) {
     const me = c.get("user") as TokenPayload;
-    const body = await c.req.json().catch(() => null);
-    if (!body) return c.json({ error: "Body tidak valid" }, 400);
+    const body = await parseBody(c, updateProfileSchema);
+    if (body instanceof Response) return body;
 
-    const { username, currentPassword, newPassword } = body as Record<string, any>;
+    const { username, avatarUrl, currentPassword, newPassword } = body;
     const updates: Record<string, any> = { updatedAt: new Date() };
 
     if (username?.trim()) {
@@ -72,17 +75,18 @@ export const meController = {
       updates.username = username.trim();
     }
 
-    if (newPassword) {
-      if (!currentPassword) return c.json({ error: "currentPassword wajib diisi untuk ganti password" }, 422);
-      if (newPassword.length < 8) return c.json({ error: "newPassword minimal 8 karakter" }, 422);
+    if (avatarUrl) {
+      updates.avatarUrl = avatarUrl;
+    }
 
+    if (newPassword) {
       const [user] = await db
         .select({ passwordHash: users.passwordHash })
         .from(users)
         .where(eq(users.id, Number(me.sub)));
 
       if (!user) return c.json({ error: "User tidak ditemukan" }, 404);
-      const valid = await Bun.password.verify(currentPassword, user.passwordHash);
+      const valid = await Bun.password.verify(currentPassword!, user.passwordHash);
       if (!valid) return c.json({ error: "Password saat ini salah" }, 401);
 
       updates.passwordHash = await Bun.password.hash(newPassword);
@@ -97,7 +101,8 @@ export const meController = {
       .set(updates)
       .where(eq(users.id, Number(me.sub)))
       .returning({
-        id: users.id, email: users.email, username: users.username, role: users.role, updatedAt: users.updatedAt,
+        id: users.id, email: users.email, username: users.username, role: users.role,
+        avatarUrl: users.avatarUrl, updatedAt: users.updatedAt,
       });
 
     return c.json({ message: "Profil berhasil diperbarui", data: updated });

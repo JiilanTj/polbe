@@ -12,7 +12,15 @@ import { ensureBucket } from "./src/lib/minio";
 // ─── Hono App ────────────────────────────────────────────────
 const app = new Hono();
 
-app.use("*", cors());
+app.use("*", cors({
+  origin: config.cors.origin.length === 1 && config.cors.origin[0] === "*"
+    ? "*"
+    : config.cors.origin,
+  allowHeaders: ["Content-Type", "Authorization"],
+  allowMethods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+  exposeHeaders: ["X-RateLimit-Limit", "X-RateLimit-Remaining", "Retry-After"],
+  credentials: true,
+}));
 
 // Register all domain routes
 registerRoutes(app);

@@ -17,3 +17,4 @@ pollsRoutes.get("/:id/my-vote", authMiddleware, pollsController.myVote);
 pollsRoutes.post("/", authMiddleware, requireRole("admin", "platform"), pollsController.create);
 pollsRoutes.patch("/:id/status", authMiddleware, requireRole("admin"), pollsController.updateStatus);
 pollsRoutes.patch("/:id/resolve", authMiddleware, requireRole("admin"), pollsController.resolve);
+pollsRoutes.delete("/:id", authMiddleware, requireRole("admin"), pollsController.deletePoll);

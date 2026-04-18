@@ -1908,6 +1908,26 @@ paths:
                               type: integer
                               example: 8
 
+  # ─── Poll Delete ───────────────────────────────────────────
+  /api/polls/{id}:
+    delete:
+      tags: [Polls]
+      summary: Hapus poll (hanya bisa saat status draft)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Poll berhasil dihapus
+        "404":
+          description: Poll tidak ditemukan
+        "409":
+          description: Poll tidak bisa dihapus karena bukan draft
+
 components:
   schemas:
     Article:
@@ -2506,6 +2526,10 @@ components:
         role:
           type: string
           enum: [user, admin, platform]
+        avatarUrl:
+          type: string
+          nullable: true
+          example: "http://localhost:9000/polymarket/uploads/user-1/avatar.jpg"
         livesBalance:
           type: integer
         livesRecoveryAt:

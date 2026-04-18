@@ -4,6 +4,9 @@ import { topupRequests, lifePackages, users, livesTransactions, referralEarnings
 import { eq, desc } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { broadcastEvent } from "../../ws/handler";
+import { parseBody, safeInt } from "../../lib/validate";
+import { topupCreateSchema } from "../../lib/schemas";
+
 
 // Referral fee rate: 0.05 USDT per 1 USDT topup downline
 const REFERRAL_FEE_RATE = 0.05;
@@ -46,19 +49,16 @@ export const topupController = {
   // POST /api/topup — user buat request topup
   async create(c: Context) {
     const me = c.get("user") as TokenPayload;
-    const body = await c.req.json().catch(() => null);
-    if (!body) return c.json({ error: "Body tidak valid" }, 400);
+    const body = await parseBody(c, topupCreateSchema);
+    if (body instanceof Response) return body;
 
-    const { packageId, proofImageUrl, walletAddress } = body as Record<string, any>;
-
-    if (!packageId) return c.json({ error: "Field 'packageId' wajib diisi" }, 422);
-    if (!proofImageUrl) return c.json({ error: "Field 'proofImageUrl' (URL bukti transfer) wajib diisi" }, 422);
+    const { packageId, proofImageUrl, walletAddress } = body;
 
     // Ambil paket
     const [pkg] = await db
       .select()
       .from(lifePackages)
-      .where(eq(lifePackages.id, Number(packageId)));
+      .where(eq(lifePackages.id, packageId));
 
     if (!pkg) return c.json({ error: "Paket tidak ditemukan" }, 404);
     if (!pkg.isActive) return c.json({ error: "Paket sedang tidak aktif" }, 400);
@@ -109,7 +109,8 @@ export const topupController = {
   // PATCH /api/topup/:id/approve — admin approve
   async approve(c: Context) {
     const me = c.get("user") as TokenPayload;
-    const id = Number(c.req.param("id"));
+    const id = safeInt(c.req.param("id"));
+    if (!id) return c.json({ error: "ID tidak valid" }, 400);
     const body = await c.req.json().catch(() => ({})) as { adminNote?: string };
 
     const [req] = await db.select().from(topupRequests).where(eq(topupRequests.id, id));
@@ -186,7 +187,8 @@ export const topupController = {
   // PATCH /api/topup/:id/reject — admin reject
   async reject(c: Context) {
     const me = c.get("user") as TokenPayload;
-    const id = Number(c.req.param("id"));
+    const id = safeInt(c.req.param("id"));
+    if (!id) return c.json({ error: "ID tidak valid" }, 400);
     const body = await c.req.json().catch(() => ({})) as { adminNote?: string };
 
     const [req] = await db.select().from(topupRequests).where(eq(topupRequests.id, id));
