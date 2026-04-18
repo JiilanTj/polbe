@@ -1,4 +1,4 @@
-import { pgTable, serial, text, varchar, timestamp, decimal, integer, pgEnum, boolean, uniqueIndex, jsonb, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, varchar, timestamp, decimal, integer, pgEnum, boolean, uniqueIndex, index, jsonb, type AnyPgColumn } from "drizzle-orm/pg-core";
 
 export const roleEnum = pgEnum("user_role", ["user", "admin", "platform"]);
 export const topupStatusEnum = pgEnum("topup_status", ["pending", "approved", "rejected"]);
@@ -129,7 +129,10 @@ export const topupRequests = pgTable("topup_requests", {
 export const withdrawalRequests = pgTable("withdrawal_requests", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").references(() => users.id).notNull(),
-  usdtAmount: decimal("usdt_amount", { precision: 10, scale: 2 }).notNull(),
+  usdtAmount: decimal("usdt_amount", { precision: 10, scale: 2 }).notNull(),  // gross amount
+  feePercent: decimal("fee_percent", { precision: 5, scale: 2 }).default("0").notNull(), // % fee saat create
+  feeAmount: decimal("fee_amount", { precision: 10, scale: 2 }).default("0").notNull(),  // fee dalam USDT
+  netAmount: decimal("net_amount", { precision: 10, scale: 2 }).notNull(),              // yang diterima user
   walletAddress: varchar("wallet_address", { length: 100 }).notNull(), // alamat tujuan user
   txHash: varchar("tx_hash", { length: 150 }),    // diisi admin saat approve
   status: withdrawalStatusEnum("status").default("pending").notNull(),
@@ -199,7 +202,10 @@ export const livesTransactions = pgTable("lives_transactions", {
   note: text("note"),
   balanceAfter: integer("balance_after").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  // Riwayat per user diurutkan waktu
+  idxUserCreatedAt: index("lives_tx_user_created_at").on(t.userId, t.createdAt),
+}));
 
 // ─── Referral Earnings ─────────────────────────────────────────────────────
 // Track komisi referral (0.05 USDT per topup downline)
@@ -233,7 +239,12 @@ export const orders = pgTable("orders", {
   expiresAt: timestamp("expires_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  // Matching engine: cari counterpart orders untuk poll+option tertentu
+  idxPollOptionStatus: index("orders_poll_option_status").on(t.pollId, t.optionIndex, t.status),
+  // User history
+  idxUserId: index("orders_user_id").on(t.userId),
+}));
 
 // ─── CLOB: Trades ─────────────────────────────────────────────────────────
 // Setiap trade adalah matching antara 1 BUY order dan 1 SELL order
@@ -250,7 +261,13 @@ export const trades = pgTable("trades", {
   size: integer("size").notNull(),                      // shares traded
   livesTransferred: integer("lives_transferred").notNull(), // lives dibayar ke seller
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  // Activity feed per poll (recent trades)
+  idxPollCreatedAt: index("trades_poll_created_at").on(t.pollId, t.createdAt),
+  // User trade history
+  idxMaker: index("trades_maker_user_id").on(t.makerUserId),
+  idxTaker: index("trades_taker_user_id").on(t.takerUserId),
+}));
 
 // ─── CLOB: Positions ──────────────────────────────────────────────────────
 // Posisi agregat user per (pollId, optionIndex)
@@ -277,7 +294,10 @@ export const priceSnapshots = pgTable("price_snapshots", {
   optionIndex: integer("option_index").notNull(),
   price: decimal("price", { precision: 6, scale: 4 }).notNull(),
   snapshotAt: timestamp("snapshot_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  // Chart query: ambil history per poll+option diurutkan waktu
+  idxPollOptionTime: index("price_snapshots_poll_option_time").on(t.pollId, t.optionIndex, t.snapshotAt),
+}));
 
 // ─── Poll Comments ─────────────────────────────────────────────────────────
 export const pollComments = pgTable("poll_comments", {
@@ -299,4 +319,60 @@ export const watchlist = pgTable("watchlist", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
   unique: uniqueIndex("watchlist_user_poll").on(t.userId, t.pollId),
+}));
+
+// ─── Notifications ─────────────────────────────────────────────────────────
+// In-app notification untuk user (order fill, payout, dll)
+export const notificationTypeEnum = pgEnum("notification_type", [
+  "order_filled",      // order terisi (sebagian atau penuh)
+  "order_cancelled",   // order dibatalkan sistem
+  "poll_resolved",     // market telah di-resolve, cek payout
+  "payout_credited",   // lives/USDT dikreditkan ke akun
+  "trade_executed",    // ada trade yang melibatkan user
+  "watchlist_update",  // poll di watchlist berubah status
+]);
+
+export const notifications = pgTable("notifications", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  type: notificationTypeEnum("type").notNull(),
+  title: varchar("title", { length: 200 }).notNull(),
+  body: text("body").notNull(),
+  refId: integer("ref_id"),                             // orderId / pollId / tradeId
+  refType: varchar("ref_type", { length: 50 }),         // "order" | "poll" | "trade"
+  isRead: boolean("is_read").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  idxUserId: index("notifications_user_id").on(t.userId),
+  idxUserUnread: index("notifications_user_unread").on(t.userId, t.isRead),
+}));
+
+// ─── Indexes untuk performance ─────────────────────────────────────────────
+// Indexes didefinisikan inline di masing-masing tabel melalui table config.
+// Migration SQL akan di-generate oleh drizzle-kit generate.
+
+// ─── Platform Settings ────────────────────────────────────────────────────
+// Singleton row (id=1) untuk konfigurasi global platform
+export const platformSettings = pgTable("platform_settings", {
+  id: serial("id").primaryKey(),
+  withdrawalFeePercent: decimal("withdrawal_fee_percent", { precision: 5, scale: 2 }).default("1").notNull(), // default 1%
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  updatedBy: integer("updated_by").references(() => users.id),
+});
+
+// ─── Admin Audit Logs ──────────────────────────────────────────────────────
+// Rekam semua aksi admin untuk keperluan governance dan keamanan
+export const adminAuditLogs = pgTable("admin_audit_logs", {
+  id: serial("id").primaryKey(),
+  adminId: integer("admin_id").notNull().references(() => users.id),
+  action: varchar("action", { length: 100 }).notNull(), // "credit_lives" | "approve_topup" | dll
+  targetUserId: integer("target_user_id").references(() => users.id),
+  targetResourceId: integer("target_resource_id"),       // pollId / topupId / dll
+  targetResourceType: varchar("target_resource_type", { length: 50 }), // "poll" | "topup" | dll
+  metadata: jsonb("metadata"),                           // detail aksi dalam JSON
+  ipAddress: varchar("ip_address", { length: 45 }),      // IPv4/IPv6
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  idxAdminId: index("audit_logs_admin_id").on(t.adminId),
+  idxCreatedAt: index("audit_logs_created_at").on(t.createdAt),
 }));

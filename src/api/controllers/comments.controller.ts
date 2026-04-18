@@ -3,7 +3,7 @@ import { db } from "../../db";
 import { pollComments, users, polls } from "../../db/schema";
 import { eq, and, desc, isNull, sql } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
-import { parseBody, safeInt } from "../../lib/validate";
+import { parseBody, safeInt, escapeHtml } from "../../lib/validate";
 import { commentCreateSchema } from "../../lib/schemas";
 
 export const commentsController = {
@@ -61,7 +61,7 @@ export const commentsController = {
     if (!poll) return c.json({ error: "Poll tidak ditemukan" }, 404);
 
     const [comment] = await db.insert(pollComments)
-      .values({ pollId, userId: Number(me.sub), body: body.body.trim() })
+      .values({ pollId, userId: Number(me.sub), body: escapeHtml(body.body.trim()) })
       .returning();
 
     // Ambil username untuk response

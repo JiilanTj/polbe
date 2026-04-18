@@ -57,6 +57,27 @@
       "when": 1776495081108,
       "tag": "0007_faithful_colonel_america",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1776496156875,
+      "tag": "0008_skinny_ultragirl",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1776496747515,
+      "tag": "0009_wise_hemingway",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1776497491149,
+      "tag": "0010_condemned_wonder_man",
+      "breakpoints": true
     }
   ]
 }

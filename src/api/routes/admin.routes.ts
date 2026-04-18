@@ -13,3 +13,13 @@ adminRoutes.get("/users/:id", adminController.getUser);
 adminRoutes.patch("/users/:id/toggle", adminController.toggleUser);
 adminRoutes.patch("/users/:id/role", adminController.changeRole);
 adminRoutes.post("/users/:id/credit", adminController.creditLives);
+
+// ─── Audit endpoints ────────────────────────────────────────────────────────
+adminRoutes.get("/orders", adminController.listOrders);
+adminRoutes.get("/positions", adminController.listPositions);
+adminRoutes.get("/trades", adminController.listTrades);
+adminRoutes.get("/audit-logs", adminController.listAuditLogs);
+
+// ─── Platform Settings ───────────────────────────────────────────────────────
+adminRoutes.get("/settings", adminController.getSettings);
+adminRoutes.patch("/settings/withdrawal-fee", adminController.updateWithdrawalFee);

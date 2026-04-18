@@ -1,11 +1,11 @@
 import type { Context } from "hono";
 import { db } from "../../db";
 import { orders, trades, positions, polls, users, priceSnapshots } from "../../db/schema";
-import { eq, and, desc, asc, or, sql, ne, isNull } from "drizzle-orm";
+import { eq, and, desc, asc, or, sql, isNull } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { parseBody, safeInt } from "../../lib/validate";
 import { orderPlaceSchema } from "../../lib/schemas";
-import { matchOrder, lockSharesForSell, restoreSharesForCancel } from "../../lib/clob";
+import { matchOrder, restoreSharesForCancel } from "../../lib/clob";
 
 export const ordersController = {
   // POST /api/polls/:id/orders — tempatkan limit order BUY atau SELL
@@ -31,55 +31,91 @@ export const ordersController = {
     const userId = Number(me.sub);
 
     if (side === "buy") {
-      // BUY: hitung biaya & potong dari lives balance
+      // ── BUY: atomic — cek saldo, potong lives, insert order ──────────────
       const cost = Math.ceil(size * price);
-      const [user] = await db.select({ livesBalance: users.livesBalance }).from(users).where(eq(users.id, userId));
-      if (!user) return c.json({ error: "User tidak ditemukan" }, 404);
-      if (user.livesBalance < cost) {
-        return c.json({ error: `Lives tidak cukup. Punya ${user.livesBalance}, butuh ${cost}` }, 400);
-      }
 
-      // Potong lives, masukkan ke prize pool
-      await db.update(users).set({ livesBalance: sql`lives_balance - ${cost}` }).where(eq(users.id, userId));
-      await db.update(polls).set({ prizePool: sql`prize_pool + ${cost}` }).where(eq(polls.id, pollId));
+      const order = await db.transaction(async (tx) => {
+        const [user] = await tx
+          .select({ livesBalance: users.livesBalance })
+          .from(users)
+          .where(eq(users.id, userId))
+          .for("update"); // row-level lock
 
-      // Insert order
-      const inserted = await db.insert(orders).values({
-        pollId, userId, optionIndex,
-        side: "buy",
-        price: price.toFixed(4),
-        size,
-        livesPaidIn: cost,
-      }).returning();
-      const order = inserted[0];
-      if (!order) return c.json({ error: "Gagal membuat order" }, 500);
+        if (!user) throw new Error("USER_NOT_FOUND");
+        if (user.livesBalance < cost) throw new Error(`INSUFFICIENT:${user.livesBalance}:${cost}`);
 
-      // Jalankan matching engine
+        await tx.update(users)
+          .set({ livesBalance: sql`lives_balance - ${cost}` })
+          .where(eq(users.id, userId));
+        await tx.update(polls)
+          .set({ prizePool: sql`prize_pool + ${cost}` })
+          .where(eq(polls.id, pollId));
+
+        const [newOrder] = await tx.insert(orders).values({
+          pollId, userId, optionIndex, side: "buy",
+          price: price.toFixed(4), size, livesPaidIn: cost,
+          ...(body.expiresAt ? { expiresAt: new Date(body.expiresAt) } : {}),
+        }).returning();
+
+        return newOrder;
+      }).catch((err: Error) => {
+        if (err.message === "USER_NOT_FOUND") return c.json({ error: "User tidak ditemukan" }, 404);
+        if (err.message.startsWith("INSUFFICIENT")) {
+          const [, have, need] = err.message.split(":");
+          return c.json({ error: `Lives tidak cukup. Punya ${have}, butuh ${need}` }, 400);
+        }
+        throw err;
+      });
+
+      if (!order || order instanceof Response) return order as Response;
+
       const result = await matchOrder(order.id);
-
       return c.json({
         message: `Order BUY ditempatkan${result.filledShares > 0 ? ` — ${result.filledShares}/${size} shares terisi` : " — menunggu counterpart"}`,
         data: { order, matched: result },
       }, 201);
+
     } else {
-      // SELL: kunci shares dari positions
-      const lockResult = await lockSharesForSell(userId, pollId, optionIndex, size);
-      if (!lockResult.ok) return c.json({ error: lockResult.error }, 400);
+      // ── SELL: atomic — cek + kunci shares, insert order ──────────────────
+      const order = await db.transaction(async (tx) => {
+        const [pos] = await tx
+          .select()
+          .from(positions)
+          .where(and(
+            eq(positions.userId, userId),
+            eq(positions.pollId, pollId),
+            eq(positions.optionIndex, optionIndex),
+          ))
+          .for("update"); // row-level lock mencegah race condition
 
-      // Insert order
-      const insertedSell = await db.insert(orders).values({
-        pollId, userId, optionIndex,
-        side: "sell",
-        price: price.toFixed(4),
-        size,
-        livesPaidIn: 0,
-      }).returning();
-      const order = insertedSell[0];
-      if (!order) return c.json({ error: "Gagal membuat order" }, 500);
+        const available = pos?.shares ?? 0;
+        if (available < size) {
+          throw new Error(`INSUFFICIENT_SHARES:${available}:${size}`);
+        }
 
-      // Jalankan matching engine
+        // Kunci shares langsung dalam tx yang sama
+        await tx.update(positions)
+          .set({ shares: pos!.shares - size, updatedAt: new Date() })
+          .where(eq(positions.id, pos!.id));
+
+        const [newOrder] = await tx.insert(orders).values({
+          pollId, userId, optionIndex, side: "sell",
+          price: price.toFixed(4), size, livesPaidIn: 0,
+          ...(body.expiresAt ? { expiresAt: new Date(body.expiresAt) } : {}),
+        }).returning();
+
+        return newOrder;
+      }).catch((err: Error) => {
+        if (err.message.startsWith("INSUFFICIENT_SHARES")) {
+          const [, have, need] = err.message.split(":");
+          return c.json({ error: `Shares tidak cukup. Punya ${have} shares, butuh ${need}` }, 400);
+        }
+        throw err;
+      });
+
+      if (!order || order instanceof Response) return order as Response;
+
       const result = await matchOrder(order.id);
-
       return c.json({
         message: `Order SELL ditempatkan${result.filledShares > 0 ? ` — ${result.filledShares}/${size} shares terjual` : " — menunggu buyer"}`,
         data: { order, matched: result },

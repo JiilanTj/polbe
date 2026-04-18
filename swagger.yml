@@ -42,10 +42,12 @@ tags:
     description: Profil pengguna — riwayat nyawa, referral, dan polls
   - name: Admin
     description: Admin — manajemen user, kredit nyawa, ubah role
+  - name: Watchlist
+    description: Bookmark poll untuk dipantau
+  - name: Notifications
+    description: Notifikasi in-app — order fill, payout, resolusi market
   - name: Leaderboard
     description: Papan peringkat pemain berdasarkan nyawa, kemenangan, atau referral
-  - name: Watchlist
-    description: Bookmark poll/market yang ingin dipantau
 
 security: []   # default: semua endpoint publik; endpoint yang butuh auth override dengan security: [{bearerAuth: []}]
 
@@ -1062,7 +1064,15 @@ paths:
       summary: Buat request penarikan USDT
       description: |
         User meminta penarikan saldo USDT ke alamat wallet mereka.
-        Minimum withdrawal **1 USDT**. Request menunggu konfirmasi admin.
+
+        **Batasan:**
+        - Minimum: **10 USDT**
+        - Maksimum: **5.000 USDT** per request
+        - Maksimum: **3 request per hari**
+        - Platform fee otomatis dipotong (lihat `GET /api/admin/settings` untuk rate saat ini)
+
+        Response menyertakan `feeInfo` dengan rincian gross/fee/net.
+        Request menunggu konfirmasi admin.
       security:
         - bearerAuth: []
       requestBody:
@@ -1075,8 +1085,9 @@ paths:
               properties:
                 usdtAmount:
                   type: number
-                  minimum: 1
-                  example: 25.00
+                  minimum: 10
+                  maximum: 5000
+                  example: 100.00
                 walletAddress:
                   type: string
                   description: Alamat USDT (TRC-20/ERC-20) tujuan
@@ -2635,6 +2646,228 @@ paths:
         "400":
           description: Saldo tidak cukup untuk debit
 
+  /api/admin/orders:
+    get:
+      tags: [Admin]
+      summary: Daftar semua orders (audit)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: pollId
+          schema: { type: integer }
+        - in: query
+          name: userId
+          schema: { type: integer }
+        - in: query
+          name: status
+          schema: { type: string, enum: [open, partial, filled, cancelled] }
+        - in: query
+          name: side
+          schema: { type: string, enum: [buy, sell] }
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50, maximum: 100 }
+      responses:
+        "200":
+          description: Daftar orders
+
+  /api/admin/positions:
+    get:
+      tags: [Admin]
+      summary: Daftar semua posisi user (audit)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: pollId
+          schema: { type: integer }
+        - in: query
+          name: userId
+          schema: { type: integer }
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50, maximum: 100 }
+      responses:
+        "200":
+          description: Daftar posisi
+
+  /api/admin/trades:
+    get:
+      tags: [Admin]
+      summary: Daftar semua trades (audit)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: pollId
+          schema: { type: integer }
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50, maximum: 100 }
+      responses:
+        "200":
+          description: Daftar trades
+
+  /api/admin/audit-logs:
+    get:
+      tags: [Admin]
+      summary: Riwayat aksi admin (audit trail)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: adminId
+          schema: { type: integer }
+          description: Filter berdasarkan ID admin
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50, maximum: 100 }
+      responses:
+        "200":
+          description: Daftar log aksi admin
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AdminAuditLog"
+
+  /api/admin/settings:
+    get:
+      tags: [Admin]
+      summary: Lihat konfigurasi platform (withdrawal fee, dll)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Konfigurasi platform saat ini
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PlatformSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admin/settings/withdrawal-fee:
+    patch:
+      tags: [Admin]
+      summary: Ubah withdrawal fee platform
+      description: |
+        Admin dapat mengubah persentase fee yang dipotong dari setiap withdrawal user.
+        Perubahan berlaku untuk request withdrawal **baru** (tidak retroaktif).
+        Aksi ini otomatis dicatat ke audit log.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [feePercent]
+              properties:
+                feePercent:
+                  type: number
+                  minimum: 0
+                  maximum: 100
+                  example: 1.5
+                  description: Persentase fee baru (0–100)
+      responses:
+        "200":
+          description: Fee berhasil diubah
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Withdrawal fee diubah ke 1.5%
+                  data:
+                    type: object
+                    properties:
+                      withdrawalFeePercent:
+                        type: number
+                        example: 1.5
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/me/notifications:
+    get:
+      tags: [Notifications]
+      summary: Daftar notifikasi user
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: unread
+          schema: { type: boolean }
+          description: Filter hanya notifikasi yang belum dibaca
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 50 }
+      responses:
+        "200":
+          description: Daftar notifikasi dengan unreadCount
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Notification"
+                  unreadCount:
+                    type: integer
+                    example: 3
+
+  /api/me/notifications/read-all:
+    patch:
+      tags: [Notifications]
+      summary: Tandai semua notifikasi sebagai sudah dibaca
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Semua notifikasi ditandai dibaca
+
+  /api/me/notifications/{id}/read:
+    patch:
+      tags: [Notifications]
+      summary: Tandai satu notifikasi sebagai sudah dibaca
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Notifikasi ditandai dibaca
+        "404":
+          description: Notifikasi tidak ditemukan
+
   # ─── Leaderboard ───────────────────────────────────────────
   /api/leaderboard:
     get:
@@ -3191,7 +3424,20 @@ components:
           type: integer
         usdtAmount:
           type: string
-          example: "25.00"
+          description: Jumlah gross yang diminta user
+          example: "100.00"
+        feePercent:
+          type: string
+          description: Persentase fee platform saat request dibuat
+          example: "1.00"
+        feeAmount:
+          type: string
+          description: Nominal fee dalam USDT
+          example: "1.00"
+        netAmount:
+          type: string
+          description: Jumlah yang diterima user setelah fee
+          example: "99.00"
         walletAddress:
           type: string
           example: TKxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -3415,11 +3661,71 @@ components:
           format: float
           description: Saldo USDT dari referral bonus, bisa di-withdraw
           example: 12.50
-        emailVerifiedAt:
+
+    Notification:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+        type:
+          type: string
+          enum: [order_filled, order_cancelled, poll_resolved, payout_credited, trade_executed, watchlist_update]
+          example: order_filled
+        title:
+          type: string
+          example: "Order BUY terisi penuh"
+        body:
+          type: string
+          example: "100/100 shares @0.65 telah terisi."
+        refId:
+          type: integer
+          nullable: true
+          description: ID referensi (orderId / pollId / tradeId)
+        refType:
+          type: string
+          nullable: true
+          description: '"order" | "poll" | "trade"'
+        isRead:
+          type: boolean
+          example: false
+        createdAt:
           type: string
           format: date-time
+
+    AdminAuditLog:
+      type: object
+      properties:
+        id:
+          type: integer
+        adminId:
+          type: integer
+        adminUsername:
+          type: string
           nullable: true
-          description: Waktu email diverifikasi, null jika belum
+        action:
+          type: string
+          example: credit_lives
+          description: Tipe aksi — credit_lives | debit_lives | activate_user | deactivate_user | change_role | update_withdrawal_fee
+        targetUserId:
+          type: integer
+          nullable: true
+        targetResourceId:
+          type: integer
+          nullable: true
+        targetResourceType:
+          type: string
+          nullable: true
+        metadata:
+          type: object
+          nullable: true
+          description: Detail aksi dalam format JSON
+          example: { amount: 10, note: "Bonus event" }
+        ipAddress:
+          type: string
+          nullable: true
+          example: "103.22.45.1"
         createdAt:
           type: string
           format: date-time
@@ -3479,6 +3785,14 @@ components:
           type: string
         livesBalance:
           type: integer
+
+    PlatformSettings:
+      type: object
+      properties:
+        withdrawalFeePercent:
+          type: number
+          description: Persentase fee platform untuk setiap withdrawal (default 1%)
+          example: 1
 
   responses:
     BadRequest:

@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import { db } from "../../db";
-import { topupRequests, lifePackages, users, livesTransactions, referralEarnings } from "../../db/schema";
-import { eq, desc, sql } from "drizzle-orm";
+import { topupRequests, lifePackages, users, livesTransactions, referralEarnings, notifications } from "../../db/schema";
+import { eq, desc, sql, and, gte } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { broadcastEvent } from "../../ws/handler";
 import { parseBody, safeInt } from "../../lib/validate";
@@ -13,7 +13,12 @@ const REFERRAL_FEE_RATE = 0.05;
 // 1 USDT = 1 live untuk konversi referral bonus
 const USDT_TO_LIVES = 1;
 
-async function creditLives(
+/**
+ * Kredit nyawa ke user dalam konteks tx (atau db langsung).
+ * Menerima tx/db agar bisa dipakai di dalam transaction.
+ */
+async function creditLivesTx(
+  tx: typeof db,
   userId: number,
   amount: number,
   type: "purchase" | "referral_bonus" | "admin_credit",
@@ -21,7 +26,7 @@ async function creditLives(
   refType: string,
   note: string,
 ) {
-  const [current] = await db
+  const [current] = await tx
     .select({ livesBalance: users.livesBalance })
     .from(users)
     .where(eq(users.id, userId));
@@ -30,19 +35,24 @@ async function creditLives(
 
   const balanceAfter = current.livesBalance + amount;
 
-  await db.update(users).set({ livesBalance: balanceAfter }).where(eq(users.id, userId));
+  await tx.update(users).set({ livesBalance: balanceAfter }).where(eq(users.id, userId));
 
-  await db.insert(livesTransactions).values({
-    userId,
-    amount,
-    type,
-    refId,
-    refType,
-    note,
-    balanceAfter,
+  await tx.insert(livesTransactions).values({
+    userId, amount, type, refId, refType, note, balanceAfter,
   });
 
   return balanceAfter;
+}
+
+async function creditLives(
+  userId: number,
+  amount: number,
+  type: "purchase" | "referral_bonus" | "admin_credit",
+  refId: number | null,
+  refType: string,
+  note: string,
+) {
+  return creditLivesTx(db as any, userId, amount, type, refId, refType, note);
 }
 
 export const topupController = {
@@ -119,70 +129,74 @@ export const topupController = {
       return c.json({ error: `Request sudah ${req.status}, tidak bisa diubah` }, 409);
     }
 
-    // Update status topup
-    await db
-      .update(topupRequests)
-      .set({
-        status: "approved",
-        adminNote: body.adminNote ?? null,
-        approvedBy: Number(me.sub),
-        processedAt: new Date(),
-      })
-      .where(eq(topupRequests.id, id));
+    // ── Semua operasi dalam satu transaction (atomic) ──────────────────────
+    const { newBalance, referrerId } = await db.transaction(async (tx) => {
+      // 1. Update status topup
+      await tx.update(topupRequests)
+        .set({
+          status: "approved",
+          adminNote: body.adminNote ?? null,
+          approvedBy: Number(me.sub),
+          processedAt: new Date(),
+        })
+        .where(eq(topupRequests.id, id));
 
-    // Credit lives ke user
-    const newBalance = await creditLives(
-      req.userId,
-      req.livesAmount,
-      "purchase",
-      req.id,
-      "topup_request",
-      `Topup ${req.livesAmount} nyawa (${req.usdtAmount} USDT) — approved`,
-    );
+      // 2. Credit lives ke user
+      const newBalance = await creditLivesTx(
+        tx as any, req.userId, req.livesAmount, "purchase",
+        req.id, "topup_request",
+        `Topup ${req.livesAmount} nyawa (${req.usdtAmount} USDT) — approved`,
+      );
 
-    // ─── Referral: beri komisi ke referrer ──────────────────────────
-    const [buyer] = await db
-      .select({ referredBy: users.referredBy })
-      .from(users)
-      .where(eq(users.id, req.userId));
-
-    if (buyer?.referredBy) {
-      const referrerId = buyer.referredBy;
-      const usdtEarned = Number(req.usdtAmount) * REFERRAL_FEE_RATE;
-      const livesEarned = Math.floor(usdtEarned * USDT_TO_LIVES);
-
-      await db.insert(referralEarnings).values({
-        referrerId,
-        refereeId: req.userId,
-        topupRequestId: req.id,
-        usdtEarned: String(usdtEarned.toFixed(2)),
-        livesEarned,
+      // 3. Notifikasi untuk buyer
+      await tx.insert(notifications).values({
+        userId: req.userId,
+        type: "payout_credited",
+        title: "Topup disetujui",
+        body: `${req.livesAmount} nyawa berhasil ditambahkan ke akunmu. Saldo baru: ${newBalance}.`,
+        refId: req.id,
+        refType: "topup",
       });
 
-      // Credit USDT balance ke referrer (bisa di-withdraw nanti)
-      await db
-        .update(users)
-        .set({ usdtBalance: sql`usdt_balance + ${usdtEarned.toFixed(2)}` })
-        .where(eq(users.id, referrerId));
+      // 4. Referral: beri komisi ke referrer (dalam tx yang sama)
+      const [buyer] = await tx
+        .select({ referredBy: users.referredBy })
+        .from(users)
+        .where(eq(users.id, req.userId));
 
-      // Credit lives referral bonus (hanya jika livesEarned >= 1)
-      if (livesEarned >= 1) {
-        await creditLives(
+      let referrerId: number | null = null;
+      if (buyer?.referredBy) {
+        referrerId = buyer.referredBy;
+        const usdtEarned = Number(req.usdtAmount) * REFERRAL_FEE_RATE;
+        const livesEarned = Math.floor(usdtEarned * USDT_TO_LIVES);
+
+        await tx.insert(referralEarnings).values({
           referrerId,
+          refereeId: req.userId,
+          topupRequestId: req.id,
+          usdtEarned: String(usdtEarned.toFixed(2)),
           livesEarned,
-          "referral_bonus",
-          req.id,
-          "topup_request",
-          `Komisi referral dari topup user #${req.userId}`,
-        );
-      }
-    }
+        });
 
-    // Broadcast notifikasi ke koneksi WS user bersangkutan
+        await tx.update(users)
+          .set({ usdtBalance: sql`usdt_balance + ${usdtEarned.toFixed(2)}` })
+          .where(eq(users.id, referrerId));
+
+        if (livesEarned >= 1) {
+          await creditLivesTx(
+            tx as any, referrerId, livesEarned, "referral_bonus",
+            req.id, "topup_request",
+            `Komisi referral dari topup user #${req.userId}`,
+          );
+        }
+      }
+
+      return { newBalance, referrerId };
+    });
+
+    // ── Broadcast WS di luar transaction (non-critical) ────────────────────
     broadcastEvent("topup:approved", {
-      userId: req.userId,
-      livesAmount: req.livesAmount,
-      newBalance,
+      userId: req.userId, livesAmount: req.livesAmount, newBalance,
     }, `user:${req.userId}`);
 
     return c.json({

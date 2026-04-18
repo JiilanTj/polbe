@@ -1,11 +1,11 @@
 import type { Context } from "hono";
 import { db } from "../../db";
-import { polls, pollVotes, users, livesTransactions, positions, orders, trades } from "../../db/schema";
+import { polls, pollVotes, users, livesTransactions, positions, orders, trades, notifications } from "../../db/schema";
 import { eq, desc, sql, and, ilike, gt, or } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { verifyAccessToken } from "../../lib/jwt";
 import { broadcastEvent } from "../../ws/handler";
-import { parseBody, safeInt } from "../../lib/validate";
+import { parseBody, safeInt, escapeHtml } from "../../lib/validate";
 import { pollCreateSchema, pollVoteSchema, pollResolveSchema, pollStatusSchema } from "../../lib/schemas";
 
 // ─── Helper: kredit/debit nyawa + catat transaksi ──────────────────────────
@@ -214,10 +214,10 @@ export const pollsController = {
     const [poll] = await db
       .insert(polls)
       .values({
-        title: title.trim(),
-        description: description ?? null,
+        title: escapeHtml(title.trim()),
+        description: description ? escapeHtml(description) : null,
         category: category ?? null,
-        options,
+        options: options.map((o: string) => escapeHtml(o)),
         imageUrl: imageUrl ?? null,
         status: "draft",
         creatorId: Number(me.sub),
@@ -451,13 +451,45 @@ export const pollsController = {
       totalWinningShares, payoutPerShare, totalPaid, platformRevenue,
     }, "polls");
 
-    // Notif personal ke setiap winner
+    // Notif personal ke setiap winner (WS + DB notification)
     for (const pos of winnerPositions) {
       const payout = Math.floor(pos.shares * payoutPerShare);
       if (payout > 0) {
         broadcastEvent("poll:payout", {
           pollId, winnerOption: winnerLabel, shares: pos.shares, payout,
         }, `user:${pos.userId}`);
+
+        // Simpan notifikasi ke DB agar muncul di /me/notifications
+        await db.insert(notifications).values({
+          userId: pos.userId,
+          type: "payout_credited",
+          title: "Kamu menang! Payout dikreditkan",
+          body: `${pos.shares} shares "${winnerLabel}" × ${payoutPerShare.toFixed(4)} = ${payout} nyawa telah dikreditkan.`,
+          refId: pollId,
+          refType: "poll",
+        });
+      }
+    }
+
+    // Notifikasi poll resolved ke semua yang punya posisi (termasuk yang kalah)
+    const loserPositions = await db
+      .select({ userId: positions.userId, shares: positions.shares })
+      .from(positions)
+      .where(and(
+        eq(positions.pollId, pollId),
+        eq(positions.optionIndex, winnerOptionIndex === 0 ? 1 : 0),
+      ));
+
+    for (const pos of loserPositions) {
+      if (pos.shares > 0) {
+        await db.insert(notifications).values({
+          userId: pos.userId,
+          type: "poll_resolved",
+          title: "Market telah di-resolve",
+          body: `Market #${pollId} telah selesai. Opsi pemenang: "${winnerLabel}".`,
+          refId: pollId,
+          refType: "poll",
+        });
       }
     }
 

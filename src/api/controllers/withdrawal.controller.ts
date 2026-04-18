@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import { db } from "../../db";
-import { withdrawalRequests, users } from "../../db/schema";
-import { eq, desc, sql } from "drizzle-orm";
+import { withdrawalRequests, users, platformSettings } from "../../db/schema";
+import { eq, desc, sql, and, gte } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { broadcastEvent } from "../../ws/handler";
 import { parseBody, safeInt } from "../../lib/validate";
@@ -15,12 +15,37 @@ export const withdrawalController = {
     if (body instanceof Response) return body;
 
     const { usdtAmount, walletAddress } = body;
+    const userId = Number(me.sub);
+
+    // ── Rate limit: maks 3 withdrawal per hari ─────────────────────────────
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const todayCountRow = await db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(withdrawalRequests)
+      .where(and(
+        eq(withdrawalRequests.userId, userId),
+        gte(withdrawalRequests.createdAt, startOfDay),
+      ));
+
+    if (Number(todayCountRow[0]?.count ?? 0) >= 3) {
+      return c.json({ error: "Batas maksimum 3 request withdrawal per hari telah tercapai." }, 429);
+    }
+
+    // ── Minimum & maksimum withdrawal ─────────────────────────────────────
+    if (usdtAmount < 10) {
+      return c.json({ error: "Minimum withdrawal adalah 10 USDT" }, 422);
+    }
+    if (usdtAmount > 5000) {
+      return c.json({ error: "Maksimum withdrawal adalah 5.000 USDT per request" }, 422);
+    }
 
     // Cek saldo USDT mencukupi
     const [userData] = await db
       .select({ usdtBalance: users.usdtBalance })
       .from(users)
-      .where(eq(users.id, Number(me.sub)));
+      .where(eq(users.id, userId));
 
     if (!userData) return c.json({ error: "User tidak ditemukan" }, 404);
 
@@ -31,17 +56,26 @@ export const withdrawalController = {
       }, 400);
     }
 
-    // Freeze saldo (deduct saat create, refund saat reject)
+    // Ambil platform fee dari settings (default 1% jika belum ada row)
+    const settingsRow = await db.select().from(platformSettings).limit(1);
+    const feePercent = Number(settingsRow[0]?.withdrawalFeePercent ?? 1);
+    const feeAmount = Math.round(usdtAmount * feePercent) / 100;
+    const netAmount = usdtAmount - feeAmount;
+
+    // Freeze saldo gross (deduct saat create, refund saat reject)
     await db
       .update(users)
       .set({ usdtBalance: sql`usdt_balance - ${usdtAmount.toFixed(2)}` })
-      .where(eq(users.id, Number(me.sub)));
+      .where(eq(users.id, userId));
 
     const [request] = await db
       .insert(withdrawalRequests)
       .values({
-        userId: Number(me.sub),
+        userId,
         usdtAmount: usdtAmount.toFixed(2),
+        feePercent: feePercent.toFixed(2),
+        feeAmount: feeAmount.toFixed(2),
+        netAmount: netAmount.toFixed(2),
         walletAddress: walletAddress.trim(),
         status: "pending",
       })
@@ -49,7 +83,15 @@ export const withdrawalController = {
 
     return c.json({
       message: "Request withdrawal berhasil dikirim. Menunggu konfirmasi admin.",
-      data: request,
+      data: {
+        ...request,
+        feeInfo: {
+          grossAmount: usdtAmount,
+          feePercent,
+          feeAmount,
+          netAmount,
+        },
+      },
     }, 201);
   },
 

@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { users, livesTransactions } from "../db/schema";
-import { lte, sql, and, lt } from "drizzle-orm";
+import { lte, sql, and, lt, inArray } from "drizzle-orm";
 
 const RECOVERY_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 jam
 const RECOVERY_LIVES = 1;
@@ -32,18 +32,15 @@ export async function runLivesRecovery(): Promise<void> {
     if (batch.length === 0) break;
 
     const nextRecoveryAt = new Date(now.getTime() + RECOVERY_INTERVAL_MS);
+    const batchIds = batch.map((u) => u.id);
 
-    // Update batch sekaligus via SQL
-    await db.execute(
-      sql`
-        UPDATE users
-        SET lives_balance = lives_balance + ${RECOVERY_LIVES},
-            lives_recovery_at = ${nextRecoveryAt}
-        WHERE id = ANY(${sql.raw(
-          "ARRAY[" + batch.map((u) => u.id).join(",") + "]::integer[]",
-        )})
-      `,
-    );
+    // Update batch menggunakan inArray — aman dari SQL injection
+    await db.update(users)
+      .set({
+        livesBalance: sql`lives_balance + ${RECOVERY_LIVES}`,
+        livesRecoveryAt: nextRecoveryAt,
+      })
+      .where(inArray(users.id, batchIds));
 
     // Catat transaksi recovery untuk setiap user
     const txRows = batch.map((u) => ({

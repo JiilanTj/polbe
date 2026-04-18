@@ -2,6 +2,19 @@ import { z } from "zod";
 import type { Context } from "hono";
 
 /**
+ * Sanitasi HTML untuk mencegah XSS — escape karakter HTML khusus.
+ * Tidak menggunakan library eksternal, cukup untuk API yang tidak render HTML langsung.
+ */
+export function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#x27;");
+}
+
+/**
  * Parse dan validasi request body pakai Zod schema.
  * Kembalikan data yang sudah divalidasi, atau Response error langsung.
  *

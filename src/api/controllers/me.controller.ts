@@ -2,7 +2,7 @@ import type { Context } from "hono";
 import { db } from "../../db";
 import {
   users, livesTransactions, referralEarnings, topupRequests, withdrawalRequests,
-  pollVotes, polls, positions, orders, trades, watchlist,
+  pollVotes, polls, positions, orders, trades, watchlist, notifications,
 } from "../../db/schema";
 import { eq, desc, sql, and, or, gt } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
@@ -381,5 +381,67 @@ export const meController = {
       .where(and(eq(watchlist.userId, Number(me.sub)), eq(watchlist.pollId, pollId)));
 
     return c.json({ message: "Poll dihapus dari watchlist" });
+  },
+
+  // GET /api/me/notifications — daftar notifikasi user
+  async getNotifications(c: Context) {
+    const me = c.get("user") as TokenPayload;
+    const page = Math.max(1, Number(c.req.query("page") || "1"));
+    const limit = Math.min(50, Number(c.req.query("limit") || "20"));
+    const offset = (page - 1) * limit;
+    const unreadOnly = c.req.query("unread") === "true";
+
+    const conditions: any[] = [eq(notifications.userId, Number(me.sub))];
+    if (unreadOnly) conditions.push(eq(notifications.isRead, false));
+
+    const rows = await db
+      .select()
+      .from(notifications)
+      .where(and(...conditions))
+      .orderBy(desc(notifications.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    const countRow = await db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(notifications)
+      .where(eq(notifications.userId, Number(me.sub)));
+
+    const unreadRow = await db
+      .select({ unread: sql<number>`COUNT(*) FILTER (WHERE is_read = false)` })
+      .from(notifications)
+      .where(eq(notifications.userId, Number(me.sub)));
+
+    return c.json({
+      data: rows,
+      pagination: { page, limit, total: Number(countRow[0]?.count ?? 0) },
+      unreadCount: Number(unreadRow[0]?.unread ?? 0),
+    });
+  },
+
+  // PATCH /api/me/notifications/read-all — tandai semua notifikasi sebagai sudah dibaca
+  async markAllRead(c: Context) {
+    const me = c.get("user") as TokenPayload;
+
+    await db.update(notifications)
+      .set({ isRead: true })
+      .where(and(eq(notifications.userId, Number(me.sub)), eq(notifications.isRead, false)));
+
+    return c.json({ message: "Semua notifikasi ditandai sudah dibaca" });
+  },
+
+  // PATCH /api/me/notifications/:id/read — tandai 1 notifikasi sebagai dibaca
+  async markOneRead(c: Context) {
+    const me = c.get("user") as TokenPayload;
+    const id = Number(c.req.param("id"));
+    if (!id) return c.json({ error: "ID notifikasi tidak valid" }, 400);
+
+    const [n] = await db.select({ id: notifications.id }).from(notifications)
+      .where(and(eq(notifications.id, id), eq(notifications.userId, Number(me.sub))));
+    if (!n) return c.json({ error: "Notifikasi tidak ditemukan" }, 404);
+
+    await db.update(notifications).set({ isRead: true }).where(eq(notifications.id, id));
+
+    return c.json({ message: "Notifikasi ditandai sudah dibaca" });
   },
 };

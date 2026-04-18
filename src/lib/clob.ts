@@ -11,9 +11,12 @@
  */
 
 import { db } from "../db";
-import { orders, trades, positions, polls, users, priceSnapshots } from "../db/schema";
+import { orders, trades, positions, polls, users, priceSnapshots, notifications } from "../db/schema";
 import { eq, and, lte, gte, asc, desc, or, sql, isNull } from "drizzle-orm";
 import { broadcastEvent } from "../ws/handler";
+
+// Creator fee: 1.5% dari setiap trade, dikreditkan ke kreator poll
+const CREATOR_FEE_PERCENT = 0.015;
 
 export interface MatchResult {
   filledShares: number;
@@ -31,6 +34,12 @@ export async function matchOrder(orderId: number): Promise<MatchResult> {
     if (!order || order.status === "cancelled" || order.status === "filled") {
       return { filledShares: 0, avgFillPrice: 0, tradeCount: 0 };
     }
+
+    // Ambil creatorId poll untuk fee
+    const [poll] = await tx
+      .select({ creatorId: polls.creatorId, lastPrices: polls.lastPrices })
+      .from(polls)
+      .where(eq(polls.id, order.pollId));
 
     const isBuy = order.side === "buy";
     let remaining = order.size - order.filledSize;
@@ -71,6 +80,10 @@ export async function matchOrder(orderId: number): Promise<MatchResult> {
       const buyerId = isBuy ? order.userId : maker.userId;
       const sellerId = isBuy ? maker.userId : order.userId;
 
+      // Creator fee (1.5% dari lives yang ditransfer, dibayar dari pool)
+      const creatorFee = poll?.creatorId ? Math.floor(tradeLives * CREATOR_FEE_PERCENT) : 0;
+      const sellerReceives = tradeLives - creatorFee;
+
       // ── Update maker order ──────────────────────────────────
       const makerNewFilled = maker.filledSize + tradeSize;
       await tx.update(orders)
@@ -98,8 +111,24 @@ export async function matchOrder(orderId: number): Promise<MatchResult> {
       // ── Bayar seller dari prize pool ───────────────────────
       // Pool sudah terisi dari BUY order placement
       await tx.update(users)
-        .set({ livesBalance: sql`lives_balance + ${tradeLives}` })
+        .set({ livesBalance: sql`lives_balance + ${sellerReceives}` })
         .where(eq(users.id, sellerId));
+
+      // Bayar creator fee jika ada creatorId
+      if (creatorFee > 0 && poll?.creatorId) {
+        await tx.update(users)
+          .set({ livesBalance: sql`lives_balance + ${creatorFee}` })
+          .where(eq(users.id, poll.creatorId));
+        // Notifikasi untuk kreator
+        await tx.insert(notifications).values({
+          userId: poll.creatorId,
+          type: "trade_executed",
+          title: "Fee kreator diterima",
+          body: `Kamu menerima ${creatorFee} lives sebagai fee kreator dari trade di market ini.`,
+          refId: order.pollId,
+          refType: "poll",
+        });
+      }
 
       await tx.update(polls)
         .set({ prizePool: sql`prize_pool - ${tradeLives}` })
@@ -136,9 +165,21 @@ export async function matchOrder(orderId: number): Promise<MatchResult> {
       .set({ filledSize: takerNewFilled, status: takerStatus, updatedAt: new Date() })
       .where(eq(orders.id, orderId));
 
+    // ── Notifikasi untuk taker ───────────────────────────────
+    if (tradeCount > 0 && takerStatus !== "open") {
+      const filled = takerStatus === "filled" ? "penuh" : "sebagian";
+      await tx.insert(notifications).values({
+        userId: order.userId,
+        type: "order_filled",
+        title: `Order ${order.side.toUpperCase()} terisi ${filled}`,
+        body: `${takerNewFilled}/${order.size} shares @${Number(order.price).toFixed(2)} telah terisi.`,
+        refId: order.id,
+        refType: "order",
+      });
+    }
+
     // Update lastPrices di poll jika ada trade
     if (tradeCount > 0) {
-      const [poll] = await tx.select({ lastPrices: polls.lastPrices }).from(polls).where(eq(polls.id, order.pollId));
       const newLastPrices: Record<string, string> = (poll?.lastPrices as Record<string, string>) || {};
       newLastPrices[String(order.optionIndex)] = lastPrice.toFixed(4);
       await tx.update(polls)
