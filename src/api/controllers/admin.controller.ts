@@ -1,12 +1,33 @@
 import type { Context } from "hono";
 import { db } from "../../db";
-import { users, livesTransactions } from "../../db/schema";
+import { users, livesTransactions, topupRequests, withdrawalRequests, polls } from "../../db/schema";
 import { eq, desc, ilike, sql, or } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { parseBody, safeInt } from "../../lib/validate";
 import { adminCreditSchema, adminRoleSchema } from "../../lib/schemas";
 
 export const adminController = {
+  // GET /api/admin/stats — ringkasan dashboard admin
+  async stats(c: Context) {
+    const [pendingTopup, pendingWithdrawal, totalUsers, activePolls, livesStats] = await Promise.all([
+      db.select({ count: sql<number>`count(*)` }).from(topupRequests).where(eq(topupRequests.status, "pending")),
+      db.select({ count: sql<number>`count(*)` }).from(withdrawalRequests).where(eq(withdrawalRequests.status, "pending")),
+      db.select({ count: sql<number>`count(*)` }).from(users),
+      db.select({ count: sql<number>`count(*)` }).from(polls).where(eq(polls.status, "active")),
+      db.select({ total: sql<number>`coalesce(sum(lives_balance), 0)` }).from(users),
+    ]);
+
+    return c.json({
+      data: {
+        pendingTopup: Number(pendingTopup[0]?.count ?? 0),
+        pendingWithdrawal: Number(pendingWithdrawal[0]?.count ?? 0),
+        totalUsers: Number(totalUsers[0]?.count ?? 0),
+        activePolls: Number(activePolls[0]?.count ?? 0),
+        totalLivesInCirculation: Number(livesStats[0]?.total ?? 0),
+      },
+    });
+  },
+
   // GET /api/admin/users — list semua user dengan filter
   async listUsers(c: Context) {
     const page = Number(c.req.query("page") || "1");

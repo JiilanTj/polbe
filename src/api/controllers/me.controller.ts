@@ -21,6 +21,8 @@ export const meController = {
         role: users.role,
         isActive: users.isActive,
         avatarUrl: users.avatarUrl,
+        emailVerifiedAt: users.emailVerifiedAt,
+        usdtBalance: users.usdtBalance,
         livesBalance: users.livesBalance,
         livesRecoveryAt: users.livesRecoveryAt,
         referralCode: users.referralCode,

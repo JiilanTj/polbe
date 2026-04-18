@@ -5,12 +5,19 @@ import { eq } from "drizzle-orm";
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../../lib/jwt";
 import { redis } from "../../lib/redis";
 import { parseBody } from "../../lib/validate";
-import { registerSchema, loginSchema } from "../../lib/schemas";
+import { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } from "../../lib/schemas";
 
 // Refresh token TTL in seconds (7 days)
 const REFRESH_TTL = 60 * 60 * 24 * 7;
+// Password reset token TTL: 1 jam
+const RESET_TTL = 60 * 60;
+// Email verification token TTL: 24 jam
+const VERIFY_TTL = 60 * 60 * 24;
 // Auto-recovery interval: 6 jam dari sekarang
 const RECOVERY_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+function resetTokenKey(token: string) { return `reset:${token}`; }
+function verifyTokenKey(token: string) { return `verify:${token}`; }
 
 function refreshTokenKey(userId: number, tokenId: string) {
   return `refresh:${userId}:${tokenId}`;
@@ -77,6 +84,7 @@ export const authController = {
         livesRecoveryAt: recoveryAt,
         referralCode: newReferralCode,
         referredBy: referredById ?? undefined,
+        emailVerifiedAt: new Date(),   // auto-verified
       })
       .returning({
         id: users.id,
@@ -196,5 +204,71 @@ export const authController = {
     }
 
     return c.json({ message: "Logged out successfully" });
+  },
+
+  // POST /api/auth/verify-email — verifikasi email via token
+  async verifyEmail(c: Context) {
+    const { token } = await c.req.json<{ token: string }>().catch(() => ({ token: "" }));
+    if (!token) return c.json({ error: "Token wajib diisi" }, 400);
+
+    const userId = await redis.get(verifyTokenKey(token));
+    if (!userId) return c.json({ error: "Token tidak valid atau sudah kadaluarsa" }, 400);
+
+    await db
+      .update(users)
+      .set({ emailVerifiedAt: new Date() })
+      .where(eq(users.id, Number(userId)));
+
+    await redis.del(verifyTokenKey(token));
+
+    return c.json({ message: "Email berhasil diverifikasi" });
+  },
+
+  // POST /api/auth/forgot-password — minta reset password
+  async forgotPassword(c: Context) {
+    const body = await parseBody(c, forgotPasswordSchema);
+    if (body instanceof Response) return body;
+
+    const { email } = body;
+
+    const [user] = await db
+      .select({ id: users.id, email: users.email })
+      .from(users)
+      .where(eq(users.email, email.toLowerCase()));
+
+    // Selalu return 200 agar tidak leak info user mana yang ada
+    if (!user) {
+      return c.json({ message: "Jika email terdaftar, instruksi reset password akan dikirim" });
+    }
+
+    const resetToken = crypto.randomUUID();
+    await redis.set(resetTokenKey(resetToken), String(user.id), "EX", RESET_TTL);
+
+    // Log ke console — integrasikan dengan email service (Resend, Mailgun, SMTP, dll)
+    console.log(`[ForgotPassword] User #${user.id} (${email}): token=${resetToken} (berlaku 1 jam)`);
+
+    return c.json({ message: "Jika email terdaftar, instruksi reset password akan dikirim" });
+  },
+
+  // POST /api/auth/reset-password — reset password dengan token
+  async resetPassword(c: Context) {
+    const body = await parseBody(c, resetPasswordSchema);
+    if (body instanceof Response) return body;
+
+    const { token, newPassword } = body;
+
+    const userId = await redis.get(resetTokenKey(token));
+    if (!userId) return c.json({ error: "Token tidak valid atau sudah kadaluarsa" }, 400);
+
+    const passwordHash = await Bun.password.hash(newPassword, { algorithm: "bcrypt", cost: 12 });
+
+    await db
+      .update(users)
+      .set({ passwordHash, updatedAt: new Date() })
+      .where(eq(users.id, Number(userId)));
+
+    await redis.del(resetTokenKey(token));
+
+    return c.json({ message: "Password berhasil direset. Silakan login dengan password baru" });
   },
 };

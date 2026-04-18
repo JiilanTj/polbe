@@ -1,9 +1,10 @@
 import { db } from "../db";
 import { users, livesTransactions } from "../db/schema";
-import { lte, sql } from "drizzle-orm";
+import { lte, sql, and, lt } from "drizzle-orm";
 
 const RECOVERY_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 jam
 const RECOVERY_LIVES = 1;
+const MAX_LIVES = 10; // Tidak recovery jika saldo sudah >= batas ini
 const BATCH_SIZE = 100;
 
 /**
@@ -20,11 +21,11 @@ export async function runLivesRecovery(): Promise<void> {
   console.log(`[LivesRecovery] Memulai recovery nyawa @ ${now.toISOString()}`);
 
   while (true) {
-    // Ambil batch user yang perlu recovery
+    // Ambil batch user yang perlu recovery: waktu sudah tiba DAN saldo < MAX_LIVES
     const batch = await db
       .select({ id: users.id, livesBalance: users.livesBalance })
       .from(users)
-      .where(lte(users.livesRecoveryAt, now))
+      .where(and(lte(users.livesRecoveryAt, now), lt(users.livesBalance, MAX_LIVES)))
       .limit(BATCH_SIZE)
       .offset(offset);
 

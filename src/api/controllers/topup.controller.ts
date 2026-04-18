@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import { db } from "../../db";
 import { topupRequests, lifePackages, users, livesTransactions, referralEarnings } from "../../db/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { broadcastEvent } from "../../ws/handler";
 import { parseBody, safeInt } from "../../lib/validate";
@@ -158,6 +158,12 @@ export const topupController = {
         usdtEarned: String(usdtEarned.toFixed(2)),
         livesEarned,
       });
+
+      // Credit USDT balance ke referrer (bisa di-withdraw nanti)
+      await db
+        .update(users)
+        .set({ usdtBalance: sql`usdt_balance + ${usdtEarned.toFixed(2)}` })
+        .where(eq(users.id, referrerId));
 
       // Credit lives referral bonus (hanya jika livesEarned >= 1)
       if (livesEarned >= 1) {

@@ -41,6 +41,8 @@ tags:
   - name: Leaderboard
     description: Papan peringkat pemain berdasarkan nyawa, kemenangan, atau referral
 
+security: []   # default: semua endpoint publik; endpoint yang butuh auth override dengan security: [{bearerAuth: []}]
+
 paths:
   # ─── Auth ──────────────────────────────────────────────
   /api/auth/register:
@@ -244,6 +246,69 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+
+  /api/auth/verify-email:
+    post:
+      tags: [Auth]
+      summary: Verifikasi email dengan token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+                  example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+      responses:
+        "200":
+          description: Email berhasil diverifikasi
+        "400":
+          description: Token tidak valid atau kadaluarsa
+
+  /api/auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Minta reset password via email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        "200":
+          description: Respons selalu 200 agar tidak leak info akun yang ada
+
+  /api/auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Reset password dengan token dari email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, newPassword]
+              properties:
+                token:
+                  type: string
+                newPassword:
+                  type: string
+                  minLength: 8
+      responses:
+        "200":
+          description: Password berhasil direset
+        "400":
+          description: Token tidak valid atau kadaluarsa
 
   # ─── News ──────────────────────────────────────────────
   /api/news:
@@ -1185,6 +1250,12 @@ paths:
           schema:
             type: string
             example: crypto
+        - name: q
+          in: query
+          description: Pencarian teks di judul poll (case-insensitive)
+          schema:
+            type: string
+            example: bitcoin
       responses:
         "200":
           description: Daftar poll dengan pagination
@@ -1231,10 +1302,34 @@ paths:
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
 
+  /api/polls/trending:
+    get:
+      tags: [Polls]
+      summary: Daftar poll trending (aktif + terbanyak suara)
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+            maximum: 50
+      responses:
+        "200":
+          description: Daftar poll trending
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Poll"
+
   /api/polls/{id}:
     get:
       tags: [Polls]
-      summary: Detail poll + distribusi suara
+      summary: Detail poll + distribusi suara + userVote (opsional auth)
       parameters:
         - name: id
           in: path
@@ -1742,6 +1837,38 @@ paths:
                     $ref: "#/components/schemas/Pagination"
 
   # ─── Admin ────────────────────────────────────────────────
+  /api/admin/stats:
+    get:
+      tags: [Admin]
+      summary: Dashboard stats (admin)
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Statistik platform
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      pendingTopup:
+                        type: integer
+                      pendingWithdrawal:
+                        type: integer
+                      totalUsers:
+                        type: integer
+                      activePolls:
+                        type: integer
+                      totalLivesInCirculation:
+                        type: integer
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /api/admin/users:
     get:
       tags: [Admin]
@@ -1946,6 +2073,13 @@ paths:
                               example: 8
 
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token obtained from /api/auth/login
+
   schemas:
     Article:
       type: object
@@ -2550,6 +2684,16 @@ components:
               type: integer
             totalEarned:
               type: number
+        usdtBalance:
+          type: number
+          format: float
+          description: Saldo USDT dari referral bonus, bisa di-withdraw
+          example: 12.50
+        emailVerifiedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Waktu email diverifikasi, null jika belum
         createdAt:
           type: string
           format: date-time
@@ -2641,10 +2785,3 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
-
-  securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-      description: Access token obtained from /api/auth/login

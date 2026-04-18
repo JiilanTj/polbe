@@ -5,8 +5,9 @@ import { voteRateLimit } from "../middlewares/rate-limit.middleware";
 
 export const pollsRoutes = new Hono();
 
-// Publik — list & detail
+// Publik — list, trending & detail (trending HARUS sebelum /:id agar tidak ditangkap sebagai ID)
 pollsRoutes.get("/", pollsController.list);
+pollsRoutes.get("/trending", pollsController.trending);
 pollsRoutes.get("/:id", pollsController.getById);
 
 // User auth — vote & lihat vote sendiri

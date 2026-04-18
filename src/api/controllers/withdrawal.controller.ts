@@ -1,20 +1,41 @@
 import type { Context } from "hono";
 import { db } from "../../db";
-import { withdrawalRequests } from "../../db/schema";
-import { eq, desc } from "drizzle-orm";
+import { withdrawalRequests, users } from "../../db/schema";
+import { eq, desc, sql } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { broadcastEvent } from "../../ws/handler";
 import { parseBody, safeInt } from "../../lib/validate";
 import { withdrawalCreateSchema } from "../../lib/schemas";
 
 export const withdrawalController = {
-  // POST /api/withdrawal — user minta tarik saldo
+  // POST /api/withdrawal — user minta tarik saldo USDT
   async create(c: Context) {
     const me = c.get("user") as TokenPayload;
     const body = await parseBody(c, withdrawalCreateSchema);
     if (body instanceof Response) return body;
 
     const { usdtAmount, walletAddress } = body;
+
+    // Cek saldo USDT mencukupi
+    const [userData] = await db
+      .select({ usdtBalance: users.usdtBalance })
+      .from(users)
+      .where(eq(users.id, Number(me.sub)));
+
+    if (!userData) return c.json({ error: "User tidak ditemukan" }, 404);
+
+    const currentBalance = Number(userData.usdtBalance ?? 0);
+    if (currentBalance < usdtAmount) {
+      return c.json({
+        error: `Saldo USDT tidak cukup. Kamu punya ${currentBalance.toFixed(2)} USDT, butuh ${usdtAmount.toFixed(2)} USDT`,
+      }, 400);
+    }
+
+    // Freeze saldo (deduct saat create, refund saat reject)
+    await db
+      .update(users)
+      .set({ usdtBalance: sql`usdt_balance - ${usdtAmount.toFixed(2)}` })
+      .where(eq(users.id, Number(me.sub)));
 
     const [request] = await db
       .insert(withdrawalRequests)
@@ -93,7 +114,7 @@ export const withdrawalController = {
     });
   },
 
-  // PATCH /api/withdrawal/:id/reject — admin reject
+  // PATCH /api/withdrawal/:id/reject — admin reject (refund saldo USDT ke user)
   async reject(c: Context) {
     const me = c.get("user") as TokenPayload;
     const id = safeInt(c.req.param("id"));
@@ -116,12 +137,19 @@ export const withdrawalController = {
       })
       .where(eq(withdrawalRequests.id, id));
 
+    // Refund saldo USDT karena sudah di-freeze saat create
+    await db
+      .update(users)
+      .set({ usdtBalance: sql`usdt_balance + ${req.usdtAmount}` })
+      .where(eq(users.id, req.userId));
+
     broadcastEvent("withdrawal:rejected", {
       userId: req.userId,
       withdrawalId: id,
+      usdtRefunded: req.usdtAmount,
       note: body.adminNote ?? null,
     }, `user:${req.userId}`);
 
-    return c.json({ message: `Withdrawal #${id} ditolak` });
+    return c.json({ message: `Withdrawal #${id} ditolak. Saldo ${req.usdtAmount} USDT dikembalikan.` });
   },
 };

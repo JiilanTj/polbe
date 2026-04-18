@@ -7,6 +7,7 @@ export const adminRoutes = new Hono();
 
 adminRoutes.use("/*", authMiddleware, requireRole("admin"), defaultRateLimit);
 
+adminRoutes.get("/stats", adminController.stats);
 adminRoutes.get("/users", adminController.listUsers);
 adminRoutes.get("/users/:id", adminController.getUser);
 adminRoutes.patch("/users/:id/toggle", adminController.toggleUser);

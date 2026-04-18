@@ -1,6 +1,7 @@
 import cron from "node-cron";
 import { config } from "../config";
 import { runLivesRecovery } from "./lives-recovery";
+import { runPollExpiry } from "./poll-expiry";
 import { scrapeRssFeeds, saveArticles } from "../scrapers/rss";
 import { scrapeNewsApi } from "../scrapers/newsapi";
 import { scrapeArticleContent } from "../scrapers/content";
@@ -174,6 +175,13 @@ export function startScheduler() {
   });
 
   console.log("[Scheduler] Lives recovery job dijadwalkan setiap 6 jam.");
+
+  // Auto-close poll kadaluarsa: cek setiap menit
+  cron.schedule("* * * * *", () => {
+    runPollExpiry().catch((err) => console.error("[PollExpiry] Job gagal:", err));
+  });
+
+  console.log("[Scheduler] Poll expiry job dijadwalkan setiap menit.");
 }
 
 export { runScrapeJob };

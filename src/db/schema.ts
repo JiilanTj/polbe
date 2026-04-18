@@ -16,6 +16,9 @@ export const users = pgTable("users", {
   role: roleEnum("role").default("user").notNull(),
   isActive: boolean("is_active").default(true).notNull(),
   avatarUrl: text("avatar_url"),
+  emailVerifiedAt: timestamp("email_verified_at"),
+  // ─── USDT Balance ──────────────────────────────────────
+  usdtBalance: decimal("usdt_balance", { precision: 10, scale: 2 }).default("0").notNull(),
   // ─── Lives ────────────────────────────────────────────
   livesBalance: integer("lives_balance").default(5).notNull(),
   livesRecoveryAt: timestamp("lives_recovery_at").defaultNow().notNull(),

@@ -1,8 +1,9 @@
 import type { Context } from "hono";
 import { db } from "../../db";
 import { polls, pollVotes, users, livesTransactions } from "../../db/schema";
-import { eq, desc, sql, and } from "drizzle-orm";
+import { eq, desc, sql, and, ilike } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
+import { verifyAccessToken } from "../../lib/jwt";
 import { broadcastEvent } from "../../ws/handler";
 import { parseBody, safeInt } from "../../lib/validate";
 import { pollCreateSchema, pollVoteSchema, pollResolveSchema, pollStatusSchema } from "../../lib/schemas";
@@ -35,6 +36,7 @@ export const pollsController = {
     const limit = Math.min(Number(c.req.query("limit") || "20"), 100);
     const status = c.req.query("status");
     const category = c.req.query("category");
+    const q = c.req.query("q")?.trim();
     const offset = (page - 1) * limit;
 
     let query = db
@@ -46,9 +48,16 @@ export const pollsController = {
 
     if (status) query = query.where(eq(polls.status, status as any)) as typeof query;
     if (category) query = query.where(eq(polls.category, category)) as typeof query;
+    if (q) query = query.where(ilike(polls.title, `%${q}%`)) as typeof query;
+
+    // Count query menggunakan filter yang sama
+    let countQuery = db.select({ count: sql<number>`count(*)` }).from(polls);
+    if (status) countQuery = countQuery.where(eq(polls.status, status as any)) as typeof countQuery;
+    if (category) countQuery = countQuery.where(eq(polls.category, category)) as typeof countQuery;
+    if (q) countQuery = countQuery.where(ilike(polls.title, `%${q}%`)) as typeof countQuery;
 
     const rows = await query;
-    const countResult = await db.select({ count: sql<number>`count(*)` }).from(polls);
+    const countResult = await countQuery;
     const count = countResult[0]?.count ?? 0;
 
     return c.json({
@@ -57,9 +66,25 @@ export const pollsController = {
     });
   },
 
-  // GET /api/polls/:id — detail poll + distribusi suara
+  // GET /api/polls/trending — poll aktif diurutkan berdasarkan totalVotes DESC
+  async trending(c: Context) {
+    const limit = Math.min(Number(c.req.query("limit") || "10"), 50);
+
+    const rows = await db
+      .select()
+      .from(polls)
+      .where(eq(polls.status, "active"))
+      .orderBy(desc(polls.totalVotes))
+      .limit(limit);
+
+    return c.json({ data: rows });
+  },
+
+  // GET /api/polls/:id — detail poll + distribusi suara + userVote (optional auth)
   async getById(c: Context) {
-    const id = Number(c.req.param("id"));
+    const id = safeInt(c.req.param("id"));
+    if (!id) return c.json({ error: "ID poll tidak valid" }, 400);
+
     const [poll] = await db.select().from(polls).where(eq(polls.id, id));
     if (!poll) return c.json({ error: "Poll tidak ditemukan" }, 404);
 
@@ -86,7 +111,24 @@ export const pollsController = {
 
     const totalVotes = distribution.reduce((s, d) => s + d.votes, 0);
 
-    return c.json({ data: { ...poll, distribution, totalVotes } });
+    // Embed userVote jika request ada Authorization header (optional auth)
+    let userVote = null;
+    const authHeader = c.req.header("Authorization");
+    if (authHeader?.startsWith("Bearer ")) {
+      try {
+        const payload = await verifyAccessToken(authHeader.slice(7));
+        const viewerId = Number(payload.sub);
+        const [vote] = await db
+          .select()
+          .from(pollVotes)
+          .where(and(eq(pollVotes.pollId, id), eq(pollVotes.userId, viewerId)));
+        userVote = vote ?? null;
+      } catch {
+        // Token tidak valid — abaikan, userVote tetap null
+      }
+    }
+
+    return c.json({ data: { ...poll, distribution, totalVotes, userVote } });
   },
 
   // POST /api/polls — admin/platform buat poll
@@ -149,6 +191,17 @@ export const pollsController = {
       .set({ status: status as any, updatedAt: new Date() })
       .where(eq(polls.id, id))
       .returning();
+
+    // Broadcast ke semua subscriber saat poll diaktifkan
+    if (status === "active" && updated) {
+      broadcastEvent("poll:activated", {
+        pollId: id,
+        title: updated.title,
+        category: updated.category,
+        options: updated.options,
+        endAt: updated.endAt,
+      }, "polls");
+    }
 
     return c.json({ data: updated });
   },
@@ -218,6 +271,23 @@ export const pollsController = {
       .update(polls)
       .set({ totalVotes: sql`${polls.totalVotes} + 1`, updatedAt: new Date() })
       .where(eq(polls.id, pollId));
+
+    // Broadcast update vote count ke semua subscriber channel "polls"
+    const updatedCounts = await db
+      .select({
+        optionIndex: pollVotes.optionIndex,
+        count: sql<number>`count(*)`,
+        totalLives: sql<number>`sum(${pollVotes.livesWagered})`,
+      })
+      .from(pollVotes)
+      .where(eq(pollVotes.pollId, pollId))
+      .groupBy(pollVotes.optionIndex);
+
+    broadcastEvent("poll:vote_cast", {
+      pollId,
+      totalVotes: (poll.totalVotes || 0) + 1,
+      distribution: updatedCounts,
+    }, "polls");
 
     return c.json({
       message: `Vote berhasil! Kamu memilih: ${poll.options?.[optionIndex]}`,
