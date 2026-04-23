@@ -102,7 +102,7 @@ async function seedPackages() {
     { label: "Basic",   usdtPrice: "5",   livesAmount: 6,   sortOrder: 2 },
     { label: "Value",   usdtPrice: "10",  livesAmount: 15,  sortOrder: 3 },
     { label: "Pro",     usdtPrice: "50",  livesAmount: 80,  sortOrder: 4 },
-    { label: "Elite",   usdtPrice: "100", livesAmount: 175, sortOrder: 5 },
+    { label: "Elite",   usdtPrice: "100", livesAmount: 180, sortOrder: 5 },
     { label: "Whale",   usdtPrice: "500", livesAmount: 1000, sortOrder: 6 },
   ];
 

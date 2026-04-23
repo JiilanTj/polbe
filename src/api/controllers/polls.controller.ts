@@ -403,34 +403,76 @@ export const pollsController = {
         gt(positions.shares, 0),
       ));
 
+    // ─── 1. CLOB Payout Logic (Positions) ──────────────────────────────────
     const totalWinningShares = winnerPositions.reduce((s, p) => s + p.shares, 0);
     const prizePool = poll.prizePool;
 
-    if (totalWinningShares === 0) {
-      // Tidak ada posisi — resolve tanpa payout
-      await db.update(polls)
-        .set({ status: "resolved", winnerOptionIndex, resolvedAt: new Date(), resolvedBy: Number(me.sub), updatedAt: new Date() })
-        .where(eq(polls.id, pollId));
-      return c.json({ message: "Poll resolved (tidak ada posisi winning)" });
+    let totalClobPaid = 0;
+    let clobPayoutPerShare = 0;
+
+    if (totalWinningShares > 0) {
+      clobPayoutPerShare = Math.min(1.0, prizePool / totalWinningShares);
+      for (const pos of winnerPositions) {
+        const payout = Math.floor(pos.shares * clobPayoutPerShare);
+        if (payout <= 0) continue;
+
+        await adjustLives(
+          pos.userId, payout, "vote_payout", pollId, "poll",
+          `Menang poll #${pollId} (CLOB) — ${pos.shares} shares × ${clobPayoutPerShare.toFixed(4)} = ${payout} nyawa`,
+        );
+        totalClobPaid += payout;
+      }
     }
 
-    // Payout per share: min(1, prizePool / totalWinningShares) — capped 1 per share
-    const payoutPerShare = Math.min(1.0, prizePool / totalWinningShares);
-    let totalPaid = 0;
+    // ─── 2. Parimutuel Payout Logic (Simple Votes) ──────────────────────────
+    // Formula: 70% dr yg kalah di bagi jumlah yg bener
+    const allVotes = await db.select().from(pollVotes).where(eq(pollVotes.pollId, pollId));
+    
+    const winnersVotes = allVotes.filter(v => v.optionIndex === winnerOptionIndex);
+    const losersVotes = allVotes.filter(v => v.optionIndex !== winnerOptionIndex);
 
-    for (const pos of winnerPositions) {
-      const payout = Math.floor(pos.shares * payoutPerShare);
-      if (payout <= 0) continue;
+    const totalWinnersWagered = winnersVotes.reduce((sum, v) => sum + v.livesWagered, 0);
+    const totalLosersWagered = losersVotes.reduce((sum, v) => sum + v.livesWagered, 0);
+    
+    let totalVotePaid = 0;
+    let voteBonusPerLife = 0;
 
-      await adjustLives(
-        pos.userId, payout, "vote_payout", pollId, "poll",
-        `Menang poll #${pollId} — ${pos.shares} shares × ${payoutPerShare.toFixed(4)} = ${payout} nyawa`,
-      );
-      totalPaid += payout;
+    if (totalWinnersWagered > 0 && totalLosersWagered > 0) {
+      const prizeToDistribute = totalLosersWagered * 0.7; // 70% dr yg kalah
+      voteBonusPerLife = prizeToDistribute / totalWinnersWagered;
+
+      for (const vote of winnersVotes) {
+        const bonus = Math.floor(vote.livesWagered * voteBonusPerLife);
+        const totalPayout = vote.livesWagered + bonus;
+        
+        if (totalPayout <= 0) continue;
+
+        // Update vote record with payout info
+        await db.update(pollVotes)
+          .set({ payoutLives: String(totalPayout.toFixed(2)) })
+          .where(eq(pollVotes.id, vote.id));
+
+        await adjustLives(
+          vote.userId, totalPayout, "vote_payout", pollId, "poll",
+          `Menang poll #${pollId} (Vote) — Bet ${vote.livesWagered} + Bonus ${bonus} = ${totalPayout} nyawa`,
+        );
+        totalVotePaid += totalPayout;
+      }
+    } else if (totalWinnersWagered > 0 && totalLosersWagered === 0) {
+      // Semua menang — refund saja (atau profit 0)
+      for (const vote of winnersVotes) {
+        await adjustLives(
+          vote.userId, vote.livesWagered, "vote_payout", pollId, "poll",
+          `Refund poll #${pollId} — Semua user memilih opsi yang benar`,
+        );
+        totalVotePaid += vote.livesWagered;
+      }
     }
 
     // Sisa pool setelah payout = platform revenue
-    const platformRevenue = prizePool - totalPaid;
+    // CLOB revenue: prizePool - totalClobPaid
+    // Vote revenue: totalLosersWagered - totalVotePaid + totalWinnersWagered (sisa 30%)
+    const platformRevenue = (prizePool - totalClobPaid) + (totalLosersWagered + totalWinnersWagered - totalVotePaid);
 
     // Mark poll resolved, reset prize pool
     await db.update(polls)
@@ -448,61 +490,72 @@ export const pollsController = {
 
     broadcastEvent("poll:resolved", {
       pollId, winnerOption: winnerLabel, winnerOptionIndex,
-      totalWinningShares, payoutPerShare, totalPaid, platformRevenue,
+      clobPayoutPerShare, totalClobPaid,
+      voteBonusPerLife, totalVotePaid,
+      platformRevenue,
     }, "polls");
 
-    // Notif personal ke setiap winner (WS + DB notification)
+    // Notif personal ke setiap winner (Position Holders)
     for (const pos of winnerPositions) {
-      const payout = Math.floor(pos.shares * payoutPerShare);
+      const payout = Math.floor(pos.shares * clobPayoutPerShare);
       if (payout > 0) {
         broadcastEvent("poll:payout", {
-          pollId, winnerOption: winnerLabel, shares: pos.shares, payout,
+          pollId, winnerOption: winnerLabel, shares: pos.shares, payout, type: "clob",
         }, `user:${pos.userId}`);
 
-        // Simpan notifikasi ke DB agar muncul di /me/notifications
         await db.insert(notifications).values({
           userId: pos.userId,
           type: "payout_credited",
-          title: "Kamu menang! Payout dikreditkan",
-          body: `${pos.shares} shares "${winnerLabel}" × ${payoutPerShare.toFixed(4)} = ${payout} nyawa telah dikreditkan.`,
+          title: "Kamu menang (CLOB)! Payout dikreditkan",
+          body: `${pos.shares} shares "${winnerLabel}" × ${clobPayoutPerShare.toFixed(4)} = ${payout} nyawa telah dikreditkan.`,
           refId: pollId,
           refType: "poll",
         });
       }
     }
 
-    // Notifikasi poll resolved ke semua yang punya posisi (termasuk yang kalah)
-    const loserPositions = await db
-      .select({ userId: positions.userId, shares: positions.shares })
-      .from(positions)
-      .where(and(
-        eq(positions.pollId, pollId),
-        eq(positions.optionIndex, winnerOptionIndex === 0 ? 1 : 0),
-      ));
+    // Notif personal ke setiap winner (Voters)
+    for (const vote of winnersVotes) {
+      const bonus = Math.floor(vote.livesWagered * voteBonusPerLife);
+      const totalPayout = vote.livesWagered + bonus;
+      if (totalPayout > 0) {
+        broadcastEvent("poll:payout", {
+          pollId, winnerOption: winnerLabel, wagered: vote.livesWagered, payout: totalPayout, type: "vote",
+        }, `user:${vote.userId}`);
 
-    for (const pos of loserPositions) {
-      if (pos.shares > 0) {
         await db.insert(notifications).values({
-          userId: pos.userId,
-          type: "poll_resolved",
-          title: "Market telah di-resolve",
-          body: `Market #${pollId} telah selesai. Opsi pemenang: "${winnerLabel}".`,
+          userId: vote.userId,
+          type: "payout_credited",
+          title: "Kamu menang (Vote)! Payout dikreditkan",
+          body: `Kamu memilih "${winnerLabel}" dengan ${vote.livesWagered} nyawa. Payout: ${totalPayout} nyawa (Bonus: ${bonus}).`,
           refId: pollId,
           refType: "poll",
         });
       }
+    }
+
+    // Notifikasi ke yang kalah
+    const losers = [...new Set([...losersVotes.map(v => v.userId)])];
+    for (const userId of losers) {
+      await db.insert(notifications).values({
+        userId,
+        type: "poll_resolved",
+        title: "Market telah di-resolve",
+        body: `Market #${pollId} telah selesai. Pemenang: "${winnerLabel}". Sayangnya kamu belum beruntung.`,
+        refId: pollId,
+        refType: "poll",
+      });
     }
 
     return c.json({
       message: `Poll #${pollId} resolved! Pemenang: "${winnerLabel}"`,
       summary: {
         winnerOption: winnerLabel,
-        totalWinningShares,
         prizePool,
-        payoutPerShare: payoutPerShare.toFixed(4),
-        totalPaid,
+        totalClobPaid,
+        totalVotePaid,
         platformRevenue,
-        winners: winnerPositions.length,
+        winnersCount: winnerPositions.length + winnersVotes.length,
       },
     });
   },
