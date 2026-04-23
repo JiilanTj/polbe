@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import { db } from "../../db";
 import { orders, trades, positions, polls, users, priceSnapshots } from "../../db/schema";
-import { eq, and, desc, asc, or, sql, isNull } from "drizzle-orm";
+import { eq, and, desc, asc, or, sql, gte } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { parseBody, safeInt } from "../../lib/validate";
 import { orderPlaceSchema } from "../../lib/schemas";
@@ -42,7 +42,8 @@ export const ordersController = {
           .for("update"); // row-level lock
 
         if (!user) throw new Error("USER_NOT_FOUND");
-        if (user.livesBalance < cost) throw new Error(`INSUFFICIENT:${user.livesBalance}:${cost}`);
+        const livesBalance = Number(user.livesBalance);
+        if (livesBalance < cost) throw new Error(`INSUFFICIENT:${livesBalance}:${cost}`);
 
         await tx.update(users)
           .set({ livesBalance: sql`lives_balance - ${cost}` })
@@ -223,15 +224,40 @@ export const ordersController = {
 
     const optIdx = safeInt(c.req.query("optionIndex") ?? "0") ?? 0;
     const limit = Math.min(safeInt(c.req.query("limit") ?? "200") ?? 200, 1000);
+    const timeframe = (c.req.query("timeframe") ?? "ALL").toUpperCase();
+
+    const timeframeMs: Record<string, number | null> = {
+      "1H": 60 * 60 * 1000,
+      "6H": 6 * 60 * 60 * 1000,
+      "24H": 24 * 60 * 60 * 1000,
+      "7D": 7 * 24 * 60 * 60 * 1000,
+      "30D": 30 * 24 * 60 * 60 * 1000,
+      "ALL": null,
+    };
+    const selectedWindow = timeframeMs[timeframe] ?? null;
+    const since = selectedWindow ? new Date(Date.now() - selectedWindow) : null;
 
     const rows = await db
       .select({ price: priceSnapshots.price, snapshotAt: priceSnapshots.snapshotAt })
       .from(priceSnapshots)
-      .where(and(eq(priceSnapshots.pollId, pollId), eq(priceSnapshots.optionIndex, optIdx)))
+      .where(and(
+        eq(priceSnapshots.pollId, pollId),
+        eq(priceSnapshots.optionIndex, optIdx),
+        ...(since ? [gte(priceSnapshots.snapshotAt, since)] : []),
+      ))
       .orderBy(asc(priceSnapshots.snapshotAt))
       .limit(limit);
 
-    return c.json({ data: rows });
+    return c.json({
+      data: rows,
+      meta: {
+        pollId,
+        optionIndex: optIdx,
+        timeframe,
+        limit,
+        points: rows.length,
+      },
+    });
   },
 
   // DELETE /api/polls/:id/orders/:orderId — batalkan order sendiri

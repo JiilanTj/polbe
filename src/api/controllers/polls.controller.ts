@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { db } from "../../db";
-import { polls, pollVotes, users, livesTransactions, notifications } from "../../db/schema";
+import { polls, pollVotes, users, livesTransactions, notifications, priceSnapshots } from "../../db/schema";
 import { eq, desc, sql, and, ilike, gt } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { verifyAccessToken } from "../../lib/jwt";
@@ -284,6 +284,34 @@ export const pollsController = {
         })
         .where(eq(polls.id, pollId));
     });
+
+    const voteStats = await db
+      .select({
+        optionIndex: pollVotes.optionIndex,
+        totalLives: sql<number>`SUM(${pollVotes.livesWagered})`,
+      })
+      .from(pollVotes)
+      .where(eq(pollVotes.pollId, pollId))
+      .groupBy(pollVotes.optionIndex);
+
+    const totalLives = voteStats.reduce((sum, item) => sum + Number(item.totalLives), 0);
+    if (totalLives > 0) {
+      const lastPrices: Record<string, string> = {};
+      for (let i = 0; i < (poll.options?.length ?? 0); i++) {
+        const optionLives = Number(voteStats.find((item) => item.optionIndex === i)?.totalLives ?? 0);
+        const price = optionLives / totalLives;
+        const fixedPrice = price.toFixed(4);
+        lastPrices[String(i)] = fixedPrice;
+        await db.insert(priceSnapshots).values({
+          pollId,
+          optionIndex: i,
+          price: fixedPrice,
+        });
+      }
+      await db.update(polls)
+        .set({ lastPrices, updatedAt: new Date() })
+        .where(eq(polls.id, pollId));
+    }
 
     broadcastEvent("poll:vote_cast", { pollId, optionIndex, livesWagered: livesToWager }, "polls");
 
