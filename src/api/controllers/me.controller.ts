@@ -1,10 +1,18 @@
 import type { Context } from "hono";
 import { db } from "../../db";
 import {
-  users, livesTransactions, referralEarnings, topupRequests, withdrawalRequests,
-  pollVotes, polls, positions, orders, trades, watchlist, notifications,
+  users,
+  livesTransactions,
+  referralEarnings,
+  topupRequests,
+  withdrawalRequests,
+  pollVotes,
+  polls,
+  orders,
+  watchlist,
+  notifications,
 } from "../../db/schema";
-import { eq, desc, sql, and, or, gt, asc } from "drizzle-orm";
+import { eq, desc, sql, and } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { parseBody } from "../../lib/validate";
 import { updateProfileSchema } from "../../lib/schemas";
@@ -89,7 +97,10 @@ export const meController = {
         .where(eq(users.id, Number(me.sub)));
 
       if (!user) return c.json({ error: "User tidak ditemukan" }, 404);
-      const valid = await Bun.password.verify(currentPassword!, user.passwordHash);
+      const valid = await Bun.password.verify(
+        currentPassword!,
+        user.passwordHash,
+      );
       if (!valid) return c.json({ error: "Password saat ini salah" }, 401);
 
       updates.passwordHash = await Bun.password.hash(newPassword);
@@ -104,8 +115,12 @@ export const meController = {
       .set(updates)
       .where(eq(users.id, Number(me.sub)))
       .returning({
-        id: users.id, email: users.email, username: users.username, role: users.role,
-        avatarUrl: users.avatarUrl, updatedAt: users.updatedAt,
+        id: users.id,
+        email: users.email,
+        username: users.username,
+        role: users.role,
+        avatarUrl: users.avatarUrl,
+        updatedAt: users.updatedAt,
       });
 
     return c.json({ message: "Profil berhasil diperbarui", data: updated });
@@ -134,7 +149,12 @@ export const meController = {
 
     return c.json({
       data: rows,
-      pagination: { page, limit, total: Number(total), totalPages: Math.ceil(Number(total) / limit) },
+      pagination: {
+        page,
+        limit,
+        total: Number(total),
+        totalPages: Math.ceil(Number(total) / limit),
+      },
     });
   },
 
@@ -174,7 +194,12 @@ export const meController = {
 
     return c.json({
       data: { downlines, recentEarnings: earnings },
-      pagination: { page, limit, total: Number(total), totalPages: Math.ceil(Number(total) / limit) },
+      pagination: {
+        page,
+        limit,
+        total: Number(total),
+        totalPages: Math.ceil(Number(total) / limit),
+      },
     });
   },
 
@@ -211,56 +236,18 @@ export const meController = {
 
     return c.json({
       data: rows,
-      pagination: { page, limit, total: Number(total), totalPages: Math.ceil(Number(total) / limit) },
+      pagination: {
+        page,
+        limit,
+        total: Number(total),
+        totalPages: Math.ceil(Number(total) / limit),
+      },
     });
   },
 
-  // GET /api/me/portfolio — semua posisi user + unrealized P&L
+  // GET /api/me/portfolio — posisi pool dari riwayat pasang nyawa user
   async portfolio(c: Context) {
     const me = c.get("user") as TokenPayload;
-
-    const rows = await db
-      .select({
-        position: positions,
-        pollTitle: polls.title,
-        pollOptions: polls.options,
-        pollStatus: polls.status,
-        pollWinner: polls.winnerOptionIndex,
-        lastPrices: polls.lastPrices,
-      })
-      .from(positions)
-      .innerJoin(polls, eq(polls.id, positions.pollId))
-      .where(and(
-        eq(positions.userId, Number(me.sub)),
-        gt(positions.shares, 0),
-      ))
-      .orderBy(desc(positions.updatedAt));
-
-    const clobPositions = rows.map((r) => {
-      const lastPrices = (r.lastPrices as Record<string, string>) || {};
-      const currentPrice = lastPrices[String(r.position.optionIndex)] ?? null;
-      const shares = r.position.shares;
-      const avgEntry = Number(r.position.avgEntryPrice);
-      const unrealizedPnl = currentPrice !== null
-        ? Math.round(shares * (Number(currentPrice) - avgEntry))
-        : null;
-
-      return {
-        source: "clob",
-        pollId: r.position.pollId,
-        pollTitle: r.pollTitle,
-        pollStatus: r.pollStatus,
-        optionIndex: r.position.optionIndex,
-        optionLabel: (r.pollOptions as string[])?.[r.position.optionIndex] ?? String(r.position.optionIndex),
-        shares,
-        avgEntryPrice: avgEntry.toFixed(4),
-        totalLivesIn: r.position.totalLivesIn,
-        realizedPnl: r.position.realizedPnl,
-        currentPrice,
-        unrealizedPnl,
-        currentValue: currentPrice !== null ? Math.round(shares * Number(currentPrice)) : null,
-      };
-    });
 
     const poolRows = await db
       .select({
@@ -295,9 +282,10 @@ export const meController = {
       const currentPrice = lastPrices[String(r.optionIndex)] ?? null;
       const shares = Number(r.shares);
       const avgEntry = 1;
-      const unrealizedPnl = currentPrice !== null
-        ? Number((shares * Number(currentPrice) - shares).toFixed(2))
-        : null;
+      const unrealizedPnl =
+        currentPrice !== null
+          ? Number((shares * Number(currentPrice) - shares).toFixed(2))
+          : null;
 
       return {
         source: "pool",
@@ -305,23 +293,28 @@ export const meController = {
         pollTitle: r.pollTitle,
         pollStatus: r.pollStatus,
         optionIndex: r.optionIndex,
-        optionLabel: (r.pollOptions as string[])?.[r.optionIndex] ?? String(r.optionIndex),
+        optionLabel:
+          (r.pollOptions as string[])?.[r.optionIndex] ?? String(r.optionIndex),
         shares,
+        livesWagered: shares,
         avgEntryPrice: avgEntry.toFixed(4),
         totalLivesIn: Number(r.totalLivesIn),
         realizedPnl: 0,
         currentPrice,
         unrealizedPnl,
-        currentValue: currentPrice !== null ? Number((shares * Number(currentPrice)).toFixed(2)) : null,
+        currentValue:
+          currentPrice !== null
+            ? Number((shares * Number(currentPrice)).toFixed(2))
+            : null,
         createdAt: r.firstAt,
         updatedAt: r.updatedAt,
       };
     });
 
-    return c.json({ data: [...poolPositions, ...clobPositions] });
+    return c.json({ data: poolPositions });
   },
 
-  // GET /api/me/orders — order aktif + riwayat order user
+  // GET /api/me/orders — legacy CLOB orders, tidak dipakai di flow pasang nyawa
   async myOrders(c: Context) {
     const me = c.get("user") as TokenPayload;
     const status = c.req.query("status"); // open, partial, filled, cancelled
@@ -330,26 +323,34 @@ export const meController = {
     const offset = (page - 1) * limit;
 
     const rows = await db
-      .select({ order: orders, pollTitle: polls.title, pollOptions: polls.options })
+      .select({
+        order: orders,
+        pollTitle: polls.title,
+        pollOptions: polls.options,
+      })
       .from(orders)
       .innerJoin(polls, eq(polls.id, orders.pollId))
-      .where(and(
-        eq(orders.userId, Number(me.sub)),
-        ...(status ? [eq(orders.status, status as any)] : []),
-      ))
+      .where(
+        and(
+          eq(orders.userId, Number(me.sub)),
+          ...(status ? [eq(orders.status, status as any)] : []),
+        ),
+      )
       .orderBy(desc(orders.createdAt))
       .limit(limit)
       .offset(offset);
     const data = rows.map((r) => ({
       ...r.order,
       pollTitle: r.pollTitle,
-      optionLabel: (r.pollOptions as string[])?.[r.order.optionIndex] ?? String(r.order.optionIndex),
+      optionLabel:
+        (r.pollOptions as string[])?.[r.order.optionIndex] ??
+        String(r.order.optionIndex),
     }));
 
     return c.json({ data });
   },
 
-  // GET /api/me/trades — riwayat semua trade yang melibatkan user ini
+  // GET /api/me/trades — riwayat pasang nyawa user ini
   async myTrades(c: Context) {
     const me = c.get("user") as TokenPayload;
     const page = Number(c.req.query("page") || "1");
@@ -357,26 +358,6 @@ export const meController = {
     const offset = (page - 1) * limit;
 
     const userId = Number(me.sub);
-
-    const clobRows = await db
-      .select({
-        id: trades.id,
-        pollId: trades.pollId,
-        pollTitle: polls.title,
-        optionIndex: trades.optionIndex,
-        side: trades.side,
-        price: trades.price,
-        size: trades.size,
-        livesTransferred: trades.livesTransferred,
-        role: sql<string>`CASE WHEN ${trades.makerUserId} = ${userId} THEN 'maker' ELSE 'taker' END`,
-        createdAt: trades.createdAt,
-      })
-      .from(trades)
-      .innerJoin(polls, eq(polls.id, trades.pollId))
-      .where(or(eq(trades.makerUserId, userId), eq(trades.takerUserId, userId)))
-      .orderBy(desc(trades.createdAt))
-      .limit(limit)
-      .offset(offset);
 
     const poolRows = await db
       .select({
@@ -395,18 +376,15 @@ export const meController = {
       .limit(limit)
       .offset(offset);
 
-    const clobData = clobRows.map((row) => ({
-      ...row,
-      type: "clob_trade",
-    }));
-
-    const poolData = poolRows.map((row) => ({
+    const data = poolRows.map((row) => ({
       id: row.id,
       pollId: row.pollId,
       pollTitle: row.pollTitle,
       optionIndex: row.optionIndex,
-      optionLabel: (row.pollOptions as string[])?.[row.optionIndex] ?? String(row.optionIndex),
-      side: "buy",
+      optionLabel:
+        (row.pollOptions as string[])?.[row.optionIndex] ??
+        String(row.optionIndex),
+      side: "pool",
       type: "pool_vote",
       price: "1.0000",
       size: Number(row.size),
@@ -415,21 +393,18 @@ export const meController = {
       createdAt: row.createdAt,
     }));
 
-    const data = [...clobData, ...poolData]
-      .sort((a, b) => new Date(b.createdAt as Date).getTime() - new Date(a.createdAt as Date).getTime())
-      .slice(0, limit);
-
     const [countRow] = await db
       .select({ count: sql<number>`count(*)` })
-      .from(trades)
-      .where(or(eq(trades.makerUserId, userId), eq(trades.takerUserId, userId)));
+      .from(pollVotes)
+      .where(eq(pollVotes.userId, userId));
 
     return c.json({
       data,
       pagination: {
-        page, limit,
-        total: Number(countRow?.count ?? 0) + poolData.length,
-        totalPages: Math.ceil((Number(countRow?.count ?? 0) + poolData.length) / limit),
+        page,
+        limit,
+        total: Number(countRow?.count ?? 0),
+        totalPages: Math.ceil(Number(countRow?.count ?? 0) / limit),
       },
     });
   },
@@ -450,7 +425,9 @@ export const meController = {
       .limit(limit)
       .offset(offset);
 
-    return c.json({ data: rows.map(r => ({ ...r.poll, watchedAt: r.watchedAt })) });
+    return c.json({
+      data: rows.map((r) => ({ ...r.poll, watchedAt: r.watchedAt })),
+    });
   },
 
   // POST /api/me/watchlist/:pollId — tambah ke watchlist
@@ -459,10 +436,14 @@ export const meController = {
     const pollId = Number(c.req.param("pollId"));
     if (!pollId) return c.json({ error: "ID poll tidak valid" }, 400);
 
-    const [poll] = await db.select({ id: polls.id }).from(polls).where(eq(polls.id, pollId));
+    const [poll] = await db
+      .select({ id: polls.id })
+      .from(polls)
+      .where(eq(polls.id, pollId));
     if (!poll) return c.json({ error: "Poll tidak ditemukan" }, 404);
 
-    await db.insert(watchlist)
+    await db
+      .insert(watchlist)
       .values({ userId: Number(me.sub), pollId })
       .onConflictDoNothing();
 
@@ -475,8 +456,11 @@ export const meController = {
     const pollId = Number(c.req.param("pollId"));
     if (!pollId) return c.json({ error: "ID poll tidak valid" }, 400);
 
-    await db.delete(watchlist)
-      .where(and(eq(watchlist.userId, Number(me.sub)), eq(watchlist.pollId, pollId)));
+    await db
+      .delete(watchlist)
+      .where(
+        and(eq(watchlist.userId, Number(me.sub)), eq(watchlist.pollId, pollId)),
+      );
 
     return c.json({ message: "Poll dihapus dari watchlist" });
   },
@@ -521,9 +505,15 @@ export const meController = {
   async markAllRead(c: Context) {
     const me = c.get("user") as TokenPayload;
 
-    await db.update(notifications)
+    await db
+      .update(notifications)
       .set({ isRead: true })
-      .where(and(eq(notifications.userId, Number(me.sub)), eq(notifications.isRead, false)));
+      .where(
+        and(
+          eq(notifications.userId, Number(me.sub)),
+          eq(notifications.isRead, false),
+        ),
+      );
 
     return c.json({ message: "Semua notifikasi ditandai sudah dibaca" });
   },
@@ -534,11 +524,18 @@ export const meController = {
     const id = Number(c.req.param("id"));
     if (!id) return c.json({ error: "ID notifikasi tidak valid" }, 400);
 
-    const [n] = await db.select({ id: notifications.id }).from(notifications)
-      .where(and(eq(notifications.id, id), eq(notifications.userId, Number(me.sub))));
+    const [n] = await db
+      .select({ id: notifications.id })
+      .from(notifications)
+      .where(
+        and(eq(notifications.id, id), eq(notifications.userId, Number(me.sub))),
+      );
     if (!n) return c.json({ error: "Notifikasi tidak ditemukan" }, 404);
 
-    await db.update(notifications).set({ isRead: true }).where(eq(notifications.id, id));
+    await db
+      .update(notifications)
+      .set({ isRead: true })
+      .where(eq(notifications.id, id));
 
     return c.json({ message: "Notifikasi ditandai sudah dibaca" });
   },
