@@ -4,7 +4,7 @@ import {
   users, livesTransactions, referralEarnings, topupRequests, withdrawalRequests,
   pollVotes, polls, positions, orders, trades, watchlist, notifications,
 } from "../../db/schema";
-import { eq, desc, sql, and, or, gt } from "drizzle-orm";
+import { eq, desc, sql, and, or, gt, asc } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { parseBody } from "../../lib/validate";
 import { updateProfileSchema } from "../../lib/schemas";
@@ -236,7 +236,7 @@ export const meController = {
       ))
       .orderBy(desc(positions.updatedAt));
 
-    const data = rows.map((r) => {
+    const clobPositions = rows.map((r) => {
       const lastPrices = (r.lastPrices as Record<string, string>) || {};
       const currentPrice = lastPrices[String(r.position.optionIndex)] ?? null;
       const shares = r.position.shares;
@@ -246,6 +246,7 @@ export const meController = {
         : null;
 
       return {
+        source: "clob",
         pollId: r.position.pollId,
         pollTitle: r.pollTitle,
         pollStatus: r.pollStatus,
@@ -261,7 +262,63 @@ export const meController = {
       };
     });
 
-    return c.json({ data });
+    const poolRows = await db
+      .select({
+        pollId: pollVotes.pollId,
+        optionIndex: pollVotes.optionIndex,
+        pollTitle: polls.title,
+        pollOptions: polls.options,
+        pollStatus: polls.status,
+        pollWinner: polls.winnerOptionIndex,
+        lastPrices: polls.lastPrices,
+        shares: sql<string>`SUM(${pollVotes.livesWagered})`,
+        totalLivesIn: sql<string>`SUM(${pollVotes.livesWagered})`,
+        firstAt: sql<Date>`MIN(${pollVotes.createdAt})`,
+        updatedAt: sql<Date>`MAX(${pollVotes.createdAt})`,
+      })
+      .from(pollVotes)
+      .innerJoin(polls, eq(polls.id, pollVotes.pollId))
+      .where(eq(pollVotes.userId, Number(me.sub)))
+      .groupBy(
+        pollVotes.pollId,
+        pollVotes.optionIndex,
+        polls.title,
+        polls.options,
+        polls.status,
+        polls.winnerOptionIndex,
+        polls.lastPrices,
+      )
+      .orderBy(desc(sql`MAX(${pollVotes.createdAt})`));
+
+    const poolPositions = poolRows.map((r) => {
+      const lastPrices = (r.lastPrices as Record<string, string>) || {};
+      const currentPrice = lastPrices[String(r.optionIndex)] ?? null;
+      const shares = Number(r.shares);
+      const avgEntry = 1;
+      const unrealizedPnl = currentPrice !== null
+        ? Number((shares * Number(currentPrice) - shares).toFixed(2))
+        : null;
+
+      return {
+        source: "pool",
+        pollId: r.pollId,
+        pollTitle: r.pollTitle,
+        pollStatus: r.pollStatus,
+        optionIndex: r.optionIndex,
+        optionLabel: (r.pollOptions as string[])?.[r.optionIndex] ?? String(r.optionIndex),
+        shares,
+        avgEntryPrice: avgEntry.toFixed(4),
+        totalLivesIn: Number(r.totalLivesIn),
+        realizedPnl: 0,
+        currentPrice,
+        unrealizedPnl,
+        currentValue: currentPrice !== null ? Number((shares * Number(currentPrice)).toFixed(2)) : null,
+        createdAt: r.firstAt,
+        updatedAt: r.updatedAt,
+      };
+    });
+
+    return c.json({ data: [...poolPositions, ...clobPositions] });
   },
 
   // GET /api/me/orders — order aktif + riwayat order user
@@ -301,7 +358,7 @@ export const meController = {
 
     const userId = Number(me.sub);
 
-    const rows = await db
+    const clobRows = await db
       .select({
         id: trades.id,
         pollId: trades.pollId,
@@ -321,17 +378,58 @@ export const meController = {
       .limit(limit)
       .offset(offset);
 
+    const poolRows = await db
+      .select({
+        id: pollVotes.id,
+        pollId: pollVotes.pollId,
+        pollTitle: polls.title,
+        optionIndex: pollVotes.optionIndex,
+        pollOptions: polls.options,
+        size: pollVotes.livesWagered,
+        createdAt: pollVotes.createdAt,
+      })
+      .from(pollVotes)
+      .innerJoin(polls, eq(polls.id, pollVotes.pollId))
+      .where(eq(pollVotes.userId, userId))
+      .orderBy(desc(pollVotes.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    const clobData = clobRows.map((row) => ({
+      ...row,
+      type: "clob_trade",
+    }));
+
+    const poolData = poolRows.map((row) => ({
+      id: row.id,
+      pollId: row.pollId,
+      pollTitle: row.pollTitle,
+      optionIndex: row.optionIndex,
+      optionLabel: (row.pollOptions as string[])?.[row.optionIndex] ?? String(row.optionIndex),
+      side: "buy",
+      type: "pool_vote",
+      price: "1.0000",
+      size: Number(row.size),
+      livesTransferred: Number(row.size),
+      role: "pool",
+      createdAt: row.createdAt,
+    }));
+
+    const data = [...clobData, ...poolData]
+      .sort((a, b) => new Date(b.createdAt as Date).getTime() - new Date(a.createdAt as Date).getTime())
+      .slice(0, limit);
+
     const [countRow] = await db
       .select({ count: sql<number>`count(*)` })
       .from(trades)
       .where(or(eq(trades.makerUserId, userId), eq(trades.takerUserId, userId)));
 
     return c.json({
-      data: rows,
+      data,
       pagination: {
         page, limit,
-        total: Number(countRow?.count ?? 0),
-        totalPages: Math.ceil(Number(countRow?.count ?? 0) / limit),
+        total: Number(countRow?.count ?? 0) + poolData.length,
+        totalPages: Math.ceil((Number(countRow?.count ?? 0) + poolData.length) / limit),
       },
     });
   },
