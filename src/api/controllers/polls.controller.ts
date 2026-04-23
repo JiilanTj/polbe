@@ -282,7 +282,7 @@ export const pollsController = {
       // Group winners by user (jika user vote berkali-kali)
       const userPayouts: Record<number, number> = {};
       winnersVotes.forEach(v => {
-        const bonus = Math.floor(v.livesWagered * bonusPerLife);
+        const bonus = v.livesWagered * bonusPerLife;
         const payout = v.livesWagered + bonus;
         userPayouts[v.userId] = (userPayouts[v.userId] || 0) + payout;
       });

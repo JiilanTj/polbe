@@ -20,7 +20,7 @@ export const users = pgTable("users", {
   // ─── USDT Balance ──────────────────────────────────────
   usdtBalance: decimal("usdt_balance", { precision: 10, scale: 2 }).default("0").notNull(),
   // ─── Lives ────────────────────────────────────────────
-  livesBalance: integer("lives_balance").default(5).notNull(),
+  livesBalance: decimal("lives_balance", { precision: 18, scale: 6 }).default("0").notNull(),
   livesRecoveryAt: timestamp("lives_recovery_at").defaultNow().notNull(),
   // ─── Referral ─────────────────────────────────────────
   referralCode: varchar("referral_code", { length: 20 }).unique(),
@@ -184,7 +184,7 @@ export const pollVotes = pgTable("poll_votes", {
   pollId: integer("poll_id").references(() => polls.id).notNull(),
   userId: integer("user_id").references(() => users.id).notNull(),
   optionIndex: integer("option_index").notNull(),       // index opsi yang dipilih
-  livesWagered: integer("lives_wagered").default(1).notNull(),
+  livesWagered: decimal("lives_wagered", { precision: 18, scale: 6 }).default("0").notNull(),
   payoutLives: decimal("payout_lives"),                 // diisi saat resolusi
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
@@ -196,12 +196,12 @@ export const pollVotes = pgTable("poll_votes", {
 export const livesTransactions = pgTable("lives_transactions", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").references(() => users.id).notNull(),
-  amount: integer("amount").notNull(),                  // positif = kredit, negatif = debit
+  amount: decimal("amount", { precision: 18, scale: 6 }).notNull(),                  // positif = kredit, negatif = debit
   type: livesTransactionTypeEnum("type").notNull(),
   refId: integer("ref_id"),                             // topup_request_id / poll_vote_id / dll
   refType: varchar("ref_type", { length: 50 }),
   note: text("note"),
-  balanceAfter: integer("balance_after").notNull(),
+  balanceAfter: decimal("balance_after", { precision: 18, scale: 6 }).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
   // Riwayat per user diurutkan waktu
