@@ -178,7 +178,7 @@ export const polls = pgTable("polls", {
 });
 
 // ─── Poll Votes ────────────────────────────────────────────────────────────
-// Setiap user hanya bisa vote 1x per poll
+// Setiap aksi pasang nyawa dicatat sebagai row terpisah.
 export const pollVotes = pgTable("poll_votes", {
   id: serial("id").primaryKey(),
   pollId: integer("poll_id").references(() => polls.id).notNull(),
@@ -187,9 +187,7 @@ export const pollVotes = pgTable("poll_votes", {
   livesWagered: decimal("lives_wagered", { precision: 18, scale: 6 }).default("0").notNull(),
   payoutLives: decimal("payout_lives"),                 // diisi saat resolusi
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (t) => ({
-  uniqueUserPoll: uniqueIndex("unique_user_poll_vote").on(t.userId, t.pollId),
-}));
+});
 
 // ─── Lives Transactions ────────────────────────────────────────────────────
 // Audit log semua perubahan nyawa

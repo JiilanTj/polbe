@@ -19,8 +19,9 @@ import {
   platformSettings,
   livesTransactions,
   pollVotes,
+  priceSnapshots,
 } from "./schema";
-import { eq } from "drizzle-orm";
+import { eq, sql, and } from "drizzle-orm";
 
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/polymarket";
 
@@ -217,6 +218,37 @@ async function seedPolls(adminId: number, userIds: number[]) {
 
       log(`    -> User #${userId} pasang ${randomWager} nyawa di "${p.options[randomOption]}"`);
     }
+
+    const voteStats = await db
+      .select({
+        optionIndex: pollVotes.optionIndex,
+        totalLives: sql<number>`SUM(${pollVotes.livesWagered})`,
+      })
+      .from(pollVotes)
+      .where(eq(pollVotes.pollId, pollId))
+      .groupBy(pollVotes.optionIndex);
+
+    const totalLives = voteStats.reduce((sum, item) => sum + Number(item.totalLives), 0);
+    if (totalLives > 0) {
+      const lastPrices: Record<string, string> = {};
+      for (let i = 0; i < p.options.length; i++) {
+        const optionLives = Number(voteStats.find((item) => item.optionIndex === i)?.totalLives ?? 0);
+        const price = (optionLives / totalLives).toFixed(4);
+        lastPrices[String(i)] = price;
+        await db.insert(priceSnapshots).values({
+          pollId,
+          optionIndex: i,
+          price,
+        });
+      }
+
+      await db.update(polls)
+        .set({
+          prizePool: String(totalLives),
+          lastPrices,
+        })
+        .where(eq(polls.id, pollId));
+    }
   }
 }
 
@@ -244,7 +276,6 @@ async function main() {
   await client.end();
 }
 
-import { sql, and } from "drizzle-orm";
 main().catch((err) => {
   console.error("Seed error:", err);
   process.exit(1);

@@ -1,0 +1,1 @@
+DROP INDEX "unique_user_poll_vote";
