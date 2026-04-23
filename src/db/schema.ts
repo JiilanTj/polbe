@@ -167,11 +167,11 @@ export const polls = pgTable("polls", {
   livesPerVote: integer("lives_per_vote").default(1).notNull(),
   platformFeePercent: decimal("platform_fee_percent", { precision: 5, scale: 2 }).default("30").notNull(),
   // ─── CLOB Prize Pool ────────────────────────────────────
-  prizePool: integer("prize_pool").default(0).notNull(),
+  prizePool: decimal("prize_pool", { precision: 18, scale: 6 }).default("0").notNull(),
   lastPrices: jsonb("last_prices"),                      // { "0": "0.5000", "1": "0.5000" }
   // ─── Stats ─────────────────────────────────────────────
   totalVotes: integer("total_votes").default(0).notNull(),
-  totalVolume: integer("total_volume").default(0).notNull(), // total lives traded (semua trades)
+  totalVolume: decimal("total_volume", { precision: 18, scale: 6 }).default("0").notNull(), // total lives traded (semua trades)
   // ─── Timestamps ────────────────────────────────────────
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
