@@ -19,7 +19,7 @@ pollsRoutes.get("/:id/my-vote", authMiddleware, pollsController.myVote);
 // ─── CLOB: Order Book ─────────────────────────────────────────
 pollsRoutes.post("/:id/orders", authMiddleware, ordersController.placeOrder);
 pollsRoutes.get("/:id/orderbook", ordersController.getOrderBook);
-pollsRoutes.get("/:id/activity", ordersController.getActivity);
+pollsRoutes.get("/:id/activity", pollsController.getActivity);
 pollsRoutes.get("/:id/price-history", ordersController.getPriceHistory);
 pollsRoutes.delete("/:id/orders/:orderId", authMiddleware, ordersController.cancelOrder);
 

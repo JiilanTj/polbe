@@ -290,6 +290,20 @@ export const pollsController = {
     return c.json({ message: "Berhasil memasang nyawa!" }, 201);
   },
 
+  // GET /api/polls/:id/my-vote — lihat vote user yang sedang login di poll ini
+  async myVote(c: Context) {
+    const me = c.get("user") as TokenPayload;
+    const pollId = safeInt(c.req.param("id"));
+    if (!pollId) return c.json({ error: "ID poll tidak valid" }, 400);
+
+    const votes = await db
+      .select()
+      .from(pollVotes)
+      .where(and(eq(pollVotes.pollId, pollId), eq(pollVotes.userId, Number(me.sub))));
+
+    return c.json({ data: votes });
+  },
+
   // PATCH /api/polls/:id/resolve — admin tentukan pemenang + payout 70/30
   async resolve(c: Context) {
     const me = c.get("user") as TokenPayload;
@@ -356,5 +370,37 @@ export const pollsController = {
     await db.delete(pollVotes).where(eq(pollVotes.pollId, id));
     await db.delete(polls).where(eq(polls.id, id));
     return c.json({ message: "Poll dihapus" });
+  },
+
+  // GET /api/polls/:id/activity — daftar orang yang pasang nyawa (recent votes)
+  async getActivity(c: Context) {
+    const pollId = safeInt(c.req.param("id"));
+    if (!pollId) return c.json({ error: "ID poll tidak valid" }, 400);
+
+    const limit = Math.min(Number(c.req.query("limit") || "50"), 100);
+
+    const rows = await db
+      .select({
+        id: pollVotes.id,
+        userId: pollVotes.userId,
+        username: users.username,
+        optionIndex: pollVotes.optionIndex,
+        livesWagered: pollVotes.livesWagered,
+        createdAt: pollVotes.createdAt,
+      })
+      .from(pollVotes)
+      .leftJoin(users, eq(pollVotes.userId, users.id))
+      .where(eq(pollVotes.pollId, pollId))
+      .orderBy(desc(pollVotes.createdAt))
+      .limit(limit);
+
+    // Format agar cocok dengan UI Flutter (map to activity format)
+    const formatted = rows.map(r => ({
+      ...r,
+      type: "vote",
+      price: r.livesWagered, // map livesWagered ke field price buat UI
+    }));
+
+    return c.json({ data: formatted });
   },
 };
