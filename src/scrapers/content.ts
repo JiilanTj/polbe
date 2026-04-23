@@ -46,10 +46,9 @@ function extractParagraphs($: cheerio.CheerioAPI, selector: string): string {
 }
 
 /**
- * Scrape full article content from a URL.
- * Uses site-specific selectors first, then falls back to generic ones.
+ * Scrape full article content and featured image from a URL.
  */
-export async function scrapeArticleContent(url: string): Promise<string | null> {
+export async function scrapeArticleContent(url: string): Promise<{ content: string | null; imageUrl: string | null }> {
   try {
     const response = await fetch(url, {
       headers: {
@@ -61,19 +60,26 @@ export async function scrapeArticleContent(url: string): Promise<string | null> 
       signal: AbortSignal.timeout(15000),
     });
 
-    if (!response.ok) return null;
+    if (!response.ok) return { content: null, imageUrl: null };
 
     const html = await response.text();
     const $ = cheerio.load(html);
 
-    // Remove noise
+    // 0. Extract Image from Meta Tags (Priority)
+    const imageUrl = 
+      $('meta[property="og:image"]').attr("content") || 
+      $('meta[name="twitter:image"]').attr("content") || 
+      $('link[rel="image_src"]').attr("href") || 
+      null;
+
+    // Remove noise before extracting content
     $("script, style, nav, header, footer, aside, figure, figcaption, .ad, .ads, .advertisement, .social-share, .related-articles, .comments, .newsletter, .sidebar, iframe, noscript, [role='complementary'], [role='navigation']").remove();
 
     // 1. Try site-specific selectors first
     const siteSelectors = getSiteSelectors(url);
     for (const selector of siteSelectors) {
       const text = extractParagraphs($, selector);
-      if (text.length > 200) return text;
+      if (text.length > 200) return { content: text, imageUrl };
     }
 
     // 2. Try generic article selectors
@@ -96,13 +102,13 @@ export async function scrapeArticleContent(url: string): Promise<string | null> 
 
     for (const selector of genericSelectors) {
       const text = extractParagraphs($, selector);
-      if (text.length > 200) return text;
+      if (text.length > 200) return { content: text, imageUrl };
     }
 
     // 3. Try broader selectors
     for (const selector of ["article p", "main p", "[role='main'] p"]) {
       const text = extractParagraphs($, selector);
-      if (text.length > 200) return text;
+      if (text.length > 200) return { content: text, imageUrl };
     }
 
     // 4. Last resort: all <p> tags with decent length
@@ -112,11 +118,11 @@ export async function scrapeArticleContent(url: string): Promise<string | null> 
       .filter((t) => t.length > 50)
       .join("\n\n");
 
-    if (allParagraphs.length > 200) return allParagraphs;
+    if (allParagraphs.length > 200) return { content: allParagraphs, imageUrl };
 
-    return null;
+    return { content: null, imageUrl };
   } catch (error) {
     console.error(`[Scraper] Failed to scrape content from ${url}:`, error instanceof Error ? error.message : error);
-    return null;
+    return { content: null, imageUrl: null };
   }
 }

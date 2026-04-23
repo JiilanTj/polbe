@@ -78,6 +78,13 @@
       "when": 1776497491149,
       "tag": "0010_condemned_wonder_man",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1776939166788,
+      "tag": "0011_bent_galactus",
+      "breakpoints": true
     }
   ]
 }

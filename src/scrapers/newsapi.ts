@@ -8,6 +8,7 @@ interface NewsApiArticle {
   description: string | null;
   content: string | null;
   url: string;
+  urlToImage: string | null;
   source: { id: string | null; name: string };
   publishedAt: string;
 }
@@ -57,6 +58,7 @@ export async function scrapeNewsApi(query?: string): Promise<ScrapedArticle[]> {
         description: item.description,
         content: item.content,
         url: item.url,
+        imageUrl: item.urlToImage,
         source: `newsapi:${item.source.name}`,
         publishedAt: item.publishedAt ? new Date(item.publishedAt) : null,
       });
@@ -105,6 +107,7 @@ export async function scrapeNewsApiEverything(query: string): Promise<ScrapedArt
         description: item.description,
         content: item.content,
         url: item.url,
+        imageUrl: item.urlToImage,
         source: `newsapi:${item.source.name}`,
         publishedAt: item.publishedAt ? new Date(item.publishedAt) : null,
       });

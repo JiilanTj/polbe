@@ -129,7 +129,15 @@ async function enrichTruncatedArticles() {
     .orderBy(desc(articles.scrapedAt))
     .limit(10);
 
-  const toEnrich = [...truncated, ...shortContent];
+  // Also find articles missing images
+  const missingImages = await db
+    .select({ id: articles.id, url: articles.url, content: articles.content })
+    .from(articles)
+    .where(isNull(articles.imageUrl))
+    .orderBy(desc(articles.scrapedAt))
+    .limit(10);
+
+  const toEnrich = [...truncated, ...shortContent, ...missingImages];
   // Deduplicate by id
   const seen = new Set<number>();
   const unique = toEnrich.filter((a) => {
@@ -140,15 +148,24 @@ async function enrichTruncatedArticles() {
 
   if (unique.length === 0) return;
 
-  console.log(`[Enricher] Enriching ${unique.length} articles with full content...`);
+  console.log(`[Enricher] Enriching ${unique.length} articles with content/images...`);
   let enriched = 0;
 
   for (const article of unique) {
-    const fullContent = await scrapeArticleContent(article.url);
-    if (fullContent && fullContent.length > (article.content?.length ?? 0)) {
+    const { content, imageUrl } = await scrapeArticleContent(article.url);
+    
+    const updates: any = {};
+    if (content && content.length > (article.content?.length ?? 0)) {
+      updates.content = content;
+    }
+    if (imageUrl) {
+      updates.imageUrl = imageUrl;
+    }
+
+    if (Object.keys(updates).length > 0) {
       await db
         .update(articles)
-        .set({ content: fullContent })
+        .set(updates)
         .where(eq(articles.id, article.id));
       enriched++;
     }

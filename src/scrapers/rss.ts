@@ -15,6 +15,7 @@ export interface ScrapedArticle {
   description: string | null;
   content: string | null;
   url: string;
+  imageUrl: string | null;
   source: string;
   publishedAt: Date | null;
 }
@@ -75,11 +76,15 @@ export async function scrapeRssFeeds(): Promise<ScrapedArticle[]> {
         // Strip HTML from content — Google News RSS returns HTML link lists, not real content
         const description = stripHtml(item.contentSnippet) || stripHtml(item.content);
 
+        // Extract image URL from common RSS fields
+        const imageUrl = (item as any).enclosure?.url || (item as any).image?.url || null;
+
         allArticles.push({
           title: item.title,
           description,
           content: null, // Will be enriched later by content scraper
           url,
+          imageUrl,
           source: isGoogleNews ? feed.name : (feed.name || "RSS"),
           publishedAt: item.pubDate ? new Date(item.pubDate) : null,
         });
@@ -106,6 +111,7 @@ export async function saveArticles(scrapedArticles: ScrapedArticle[]): Promise<n
           description: article.description,
           content: article.content,
           url: article.url,
+          imageUrl: article.imageUrl,
           source: article.source,
           publishedAt: article.publishedAt,
         })

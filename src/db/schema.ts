@@ -38,6 +38,7 @@ export const articles = pgTable("articles", {
   url: text("url").notNull().unique(),
   source: varchar("source", { length: 100 }).notNull(),
   category: varchar("category", { length: 50 }),
+  imageUrl: text("image_url"),
   publishedAt: timestamp("published_at"),
   scrapedAt: timestamp("scraped_at").defaultNow().notNull(),
   sentiment: varchar("sentiment", { length: 20 }),
