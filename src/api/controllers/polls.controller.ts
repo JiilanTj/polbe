@@ -23,9 +23,17 @@ async function adjustLives(
     .where(eq(users.id, userId));
   if (!current) throw new Error(`User #${userId} tidak ditemukan`);
 
-  const balanceAfter = current.livesBalance + amount;
-  await db.update(users).set({ livesBalance: balanceAfter }).where(eq(users.id, userId));
-  await db.insert(livesTransactions).values({ userId, amount, type, refId, refType, note, balanceAfter });
+  const balanceAfter = Number(current.livesBalance) + amount;
+  await db.update(users).set({ livesBalance: balanceAfter.toString() }).where(eq(users.id, userId));
+  await db.insert(livesTransactions).values({ 
+    userId, 
+    amount: amount.toString(), 
+    type, 
+    refId, 
+    refType, 
+    note, 
+    balanceAfter: balanceAfter.toString() 
+  });
   return balanceAfter;
 }
 
@@ -52,16 +60,26 @@ export const pollsController = {
 
     const rows = await query;
     
-    // Hitung total pool per poll secara real-time
-    const dataWithPool = await Promise.all(rows.map(async (poll) => {
-      const [poolRow] = await db
-        .select({ total: sql<number>`COALESCE(SUM(${pollVotes.livesWagered}), 0)` })
-        .from(pollVotes)
-        .where(eq(pollVotes.pollId, poll.id));
-      return { ...poll, totalPool: Number(poolRow?.total ?? 0) };
+    // Hitung total pool dan distribusi per poll
+    const dataWithDist = await Promise.all(rows.map(async (poll) => {
+      const votes = await db.select().from(pollVotes).where(eq(pollVotes.pollId, poll.id));
+      
+      const distribution = poll.options.map((label, index) => {
+        const votesForOption = votes.filter(v => v.optionIndex === index);
+        return {
+          index,
+          label,
+          votes: votesForOption.length,
+          totalLives: votesForOption.reduce((sum, v) => sum + Number(v.livesWagered), 0),
+        };
+      });
+
+      const totalPool = distribution.reduce((sum, d) => sum + d.totalLives, 0);
+
+      return { ...poll, totalPool, distribution };
     }));
 
-    return c.json({ data: dataWithPool });
+    return c.json({ data: dataWithDist });
   },
 
   // GET /api/polls/trending — poll aktif diurutkan berdasarkan totalVotes DESC
@@ -74,7 +92,25 @@ export const pollsController = {
       .orderBy(desc(polls.totalVotes))
       .limit(limit);
 
-    return c.json({ data: rows });
+    const dataWithDist = await Promise.all(rows.map(async (poll) => {
+      const votes = await db.select().from(pollVotes).where(eq(pollVotes.pollId, poll.id));
+      
+      const distribution = poll.options.map((label, index) => {
+        const votesForOption = votes.filter(v => v.optionIndex === index);
+        return {
+          index,
+          label,
+          votes: votesForOption.length,
+          totalLives: votesForOption.reduce((sum, v) => sum + Number(v.livesWagered), 0),
+        };
+      });
+
+      const totalPool = distribution.reduce((sum, d) => sum + d.totalLives, 0);
+
+      return { ...poll, totalPool, distribution };
+    }));
+
+    return c.json({ data: dataWithDist });
   },
 
   // GET /api/polls/:id — detail poll + distribusi suara (Pool-based)
@@ -209,40 +245,41 @@ export const pollsController = {
 
     // Cek saldo
     const [userData] = await db.select({ livesBalance: users.livesBalance }).from(users).where(eq(users.id, Number(me.sub)));
-    if (!userData || userData.livesBalance < livesToWager) {
+    if (!userData || Number(userData.livesBalance) < livesToWager) {
       return c.json({ error: "Nyawa tidak cukup" }, 400);
     }
 
     // Transaksi
     await db.transaction(async (tx) => {
       // Debit nyawa
-      const balanceAfter = userData.livesBalance - livesToWager;
-      await tx.update(users).set({ livesBalance: balanceAfter }).where(eq(users.id, Number(me.sub)));
+      const balanceAfter = Number(userData.livesBalance) - livesToWager;
+      await tx.update(users).set({ livesBalance: balanceAfter.toString() }).where(eq(users.id, Number(me.sub)));
       
       // Simpan transaksi
       const [txRow] = await tx.insert(livesTransactions).values({
         userId: Number(me.sub),
-        amount: -livesToWager,
+        amount: (-livesToWager).toString(),
         type: "vote_debit",
         refId: pollId,
         refType: "poll",
         note: `Pasang ${livesToWager} nyawa di opsi: ${poll.options?.[optionIndex]}`,
-        balanceAfter,
+        balanceAfter: balanceAfter.toString(),
       }).returning();
 
-      // Simpan vote (boleh berkali-kali)
+      // Simpan vote (oleh berkali-kali)
       await tx.insert(pollVotes).values({
         pollId,
         userId: Number(me.sub),
         optionIndex,
-        livesWagered: livesToWager,
+        livesWagered: livesToWager.toString(),
       });
 
       // Update total votes/volume di tabel polls (denormalisasi)
       await tx.update(polls)
         .set({ 
           totalVotes: sql`${polls.totalVotes} + 1`,
-          totalVolume: sql`${polls.totalVolume} + ${livesToWager}`,
+          totalVolume: (Number(poll.totalVolume || 0) + livesToWager).toString(),
+          prizePool: (Number(poll.prizePool || 0) + livesToWager).toString(),
           updatedAt: new Date() 
         })
         .where(eq(polls.id, pollId));
@@ -271,8 +308,8 @@ export const pollsController = {
     const winnersVotes = allVotes.filter(v => v.optionIndex === winnerOptionIndex);
     const losersVotes = allVotes.filter(v => v.optionIndex !== winnerOptionIndex);
 
-    const totalWinnersWagered = winnersVotes.reduce((sum, v) => sum + v.livesWagered, 0);
-    const totalLosersWagered = losersVotes.reduce((sum, v) => sum + v.livesWagered, 0);
+    const totalWinnersWagered = winnersVotes.reduce((sum, v) => sum + Number(v.livesWagered), 0);
+    const totalLosersWagered = losersVotes.reduce((sum, v) => sum + Number(v.livesWagered), 0);
 
     // ─── Payout Logic: 70% dr yg kalah di bagi jumlah yg bener ──────────────
     if (totalWinnersWagered > 0) {
@@ -282,8 +319,9 @@ export const pollsController = {
       // Group winners by user (jika user vote berkali-kali)
       const userPayouts: Record<number, number> = {};
       winnersVotes.forEach(v => {
-        const bonus = v.livesWagered * bonusPerLife;
-        const payout = v.livesWagered + bonus;
+        const livesWageredNum = Number(v.livesWagered);
+        const bonus = livesWageredNum * bonusPerLife;
+        const payout = livesWageredNum + bonus;
         userPayouts[v.userId] = (userPayouts[v.userId] || 0) + payout;
       });
 
