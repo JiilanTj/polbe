@@ -159,20 +159,21 @@ export const adminController = {
     const [user] = await db.select({ livesBalance: users.livesBalance, username: users.username }).from(users).where(eq(users.id, id));
     if (!user) return c.json({ error: "User tidak ditemukan" }, 404);
 
-    const newBalance = user.livesBalance + amount;
+    const currentBalance = Number(user.livesBalance);
+    const newBalance = currentBalance + amount;
     if (newBalance < 0) {
       return c.json({ error: `Saldo tidak cukup. Saldo saat ini: ${user.livesBalance}` }, 400);
     }
 
-    await db.update(users).set({ livesBalance: newBalance, updatedAt: new Date() }).where(eq(users.id, id));
+    await db.update(users).set({ livesBalance: newBalance.toString(), updatedAt: new Date() }).where(eq(users.id, id));
     await db.insert(livesTransactions).values({
       userId: id,
-      amount,
+      amount: amount.toString(),
       type: amount > 0 ? "admin_credit" : "admin_debit",
       refId: Number(me.sub),
       refType: "admin_action",
       note: note ?? `Admin ${amount > 0 ? "kredit" : "debit"} ${Math.abs(amount)} nyawa`,
-      balanceAfter: newBalance,
+      balanceAfter: newBalance.toString(),
     });
 
     // Audit log
