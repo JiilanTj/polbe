@@ -10,8 +10,6 @@ import { topupCreateSchema } from "../../lib/schemas";
 
 // Referral fee rate: 0.05 USDT per 1 USDT topup downline
 const REFERRAL_FEE_RATE = 0.05;
-// 1 USDT = 1 live untuk konversi referral bonus
-const USDT_TO_LIVES = 1;
 
 function requestIp(c: Context) {
   return c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? null;
@@ -25,7 +23,7 @@ async function creditLivesTx(
   tx: typeof db,
   userId: number,
   amount: number,
-  type: "purchase" | "referral_bonus" | "admin_credit",
+  type: "purchase" | "admin_credit",
   refId: number | null,
   refType: string,
   note: string,
@@ -46,17 +44,6 @@ async function creditLivesTx(
   });
 
   return balanceAfter;
-}
-
-async function creditLives(
-  userId: number,
-  amount: number,
-  type: "purchase" | "referral_bonus" | "admin_credit",
-  refId: number | null,
-  refType: string,
-  note: string,
-) {
-  return creditLivesTx(db as any, userId, amount, type, refId, refType, note);
 }
 
 export const topupController = {
@@ -170,7 +157,7 @@ export const topupController = {
         refType: "topup",
       });
 
-      // 4. Referral: beri komisi ke referrer (dalam tx yang sama)
+      // 4. Referral: beri komisi USDT ke referrer (dalam tx yang sama)
       const [buyer] = await tx
         .select({ referredBy: users.referredBy })
         .from(users)
@@ -180,27 +167,27 @@ export const topupController = {
       if (buyer?.referredBy) {
         referrerId = buyer.referredBy;
         const usdtEarned = Number(req.usdtAmount) * REFERRAL_FEE_RATE;
-        const livesEarned = Math.floor(usdtEarned * USDT_TO_LIVES);
 
         await tx.insert(referralEarnings).values({
           referrerId,
           refereeId: req.userId,
           topupRequestId: req.id,
           usdtEarned: String(usdtEarned.toFixed(2)),
-          livesEarned,
+          livesEarned: 0,
         });
 
         await tx.update(users)
           .set({ usdtBalance: sql`usdt_balance + ${usdtEarned.toFixed(2)}` })
           .where(eq(users.id, referrerId));
 
-        if (livesEarned >= 1) {
-          await creditLivesTx(
-            tx as any, referrerId, livesEarned, "referral_bonus",
-            req.id, "topup_request",
-            `Komisi referral dari topup user #${req.userId}`,
-          );
-        }
+        await tx.insert(notifications).values({
+          userId: referrerId,
+          type: "payout_credited",
+          title: "Komisi referral masuk",
+          body: `Kamu mendapat ${usdtEarned.toFixed(2)} USDT dari topup referral user #${req.userId}.`,
+          refId: req.id,
+          refType: "referral",
+        });
       }
 
       return { newBalance, referrerId };

@@ -47,7 +47,6 @@ export const meController = {
     const [earningsRow] = await db
       .select({
         totalUsdtEarned: sql<string>`COALESCE(SUM(usdt_earned), 0)`,
-        totalLivesEarned: sql<number>`COALESCE(SUM(lives_earned), 0)`,
         totalReferrals: sql<number>`COUNT(DISTINCT referee_id)`,
       })
       .from(referralEarnings)
@@ -59,7 +58,6 @@ export const meController = {
         referralStats: {
           totalReferrals: Number(earningsRow?.totalReferrals ?? 0),
           totalUsdtEarned: earningsRow?.totalUsdtEarned ?? "0",
-          totalLivesEarned: Number(earningsRow?.totalLivesEarned ?? 0),
         },
       },
     });
@@ -180,7 +178,13 @@ export const meController = {
 
     // Riwayat komisi yang sudah earned
     const earnings = await db
-      .select()
+      .select({
+        id: referralEarnings.id,
+        refereeId: referralEarnings.refereeId,
+        topupRequestId: referralEarnings.topupRequestId,
+        usdtEarned: referralEarnings.usdtEarned,
+        createdAt: referralEarnings.createdAt,
+      })
       .from(referralEarnings)
       .where(eq(referralEarnings.referrerId, Number(me.sub)))
       .orderBy(desc(referralEarnings.createdAt))

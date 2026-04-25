@@ -905,8 +905,8 @@ paths:
       description: |
         User mengirim bukti transfer USDT (URL gambar) bersama `packageId`.
         Request akan berstatus **pending** hingga admin menyetujui.
-        Setelah disetujui, nyawa otomatis dikreditkan dan referrer (jika ada) mendapat
-        komisi `floor(usdtAmount × 0.05)` nyawa.
+        Setelah disetujui, nyawa otomatis dikreditkan ke buyer dan referrer
+        (jika ada) mendapat komisi USDT sebesar `usdtAmount × 0.05`.
       security:
         - bearerAuth: []
       requestBody:
@@ -993,7 +993,7 @@ paths:
       summary: Approve request topup
       description: |
         Hanya **admin**. Mengkreditkan nyawa ke user, mencatat `livesTransaction`,
-        dan memberi komisi referral ke referrer jika ada.
+        dan memberi komisi referral USDT ke referrer jika ada.
       security:
         - bearerAuth: []
       parameters:
@@ -3712,10 +3712,12 @@ components:
         referralStats:
           type: object
           properties:
-            downlineCount:
+            totalReferrals:
               type: integer
-            totalEarned:
-              type: number
+            totalUsdtEarned:
+              type: string
+              description: Total komisi referral dalam USDT.
+              example: "5.00"
         usdtBalance:
           type: number
           format: float
@@ -3797,7 +3799,7 @@ components:
           type: integer
         type:
           type: string
-          enum: [recovery, purchase, vote_debit, vote_payout, admin_credit, admin_debit, referral_bonus]
+          enum: [recovery, purchase, vote_debit, vote_payout, admin_credit, admin_debit]
         amount:
           type: integer
         balanceAfter:
@@ -3825,11 +3827,14 @@ components:
       properties:
         id:
           type: integer
-        usdtAmount:
+        refereeId:
+          type: integer
+        topupRequestId:
+          type: integer
+        usdtEarned:
           type: string
-        note:
-          type: string
-          nullable: true
+          description: Komisi referral dalam USDT. Referral tidak mengkreditkan Lives.
+          example: "5.00"
         createdAt:
           type: string
           format: date-time

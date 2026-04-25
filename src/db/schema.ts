@@ -214,7 +214,7 @@ export const referralEarnings = pgTable("referral_earnings", {
   refereeId: integer("referee_id").references(() => users.id).notNull(),
   topupRequestId: integer("topup_request_id").references(() => topupRequests.id).notNull(),
   usdtEarned: decimal("usdt_earned", { precision: 10, scale: 2 }).notNull(),
-  livesEarned: integer("lives_earned").notNull(),       // floor(usdtEarned) lives credited
+  livesEarned: integer("lives_earned").notNull(),       // legacy column; new referral rewards are USDT-only
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
