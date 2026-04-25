@@ -80,3 +80,11 @@ export const defaultRateLimit = rateLimiter({
   windowSeconds: 60,
   prefix: "api",
 });
+
+/** Mutasi admin sensitif: lebih ketat dari read-only admin routes */
+export const adminMutationRateLimit = rateLimiter({
+  max: 30,
+  windowSeconds: 60,
+  prefix: "admin_mutation",
+  message: "Terlalu banyak aksi admin. Coba lagi dalam 1 menit.",
+});

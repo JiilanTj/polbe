@@ -14,10 +14,13 @@ const app = new Hono();
 
 app.use("*", cors({
   origin: (origin) => {
-    // Jika CORS_ORIGIN = "*", izinkan semua origin tapi reflect origin-nya (diperlukan saat credentials: true)
     const allowed = config.cors.origin;
-    if (allowed.length === 1 && allowed[0] === "*") return origin || "*";
-    return allowed.includes(origin) ? origin : allowed[0];
+    if (!origin) return allowed[0] ?? "";
+    if (allowed.includes(origin)) return origin;
+    if (process.env.NODE_ENV !== "production" && allowed.length === 1 && allowed[0] === "*") {
+      return origin;
+    }
+    return "";
   },
   allowHeaders: ["Content-Type", "Authorization"],
   allowMethods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],

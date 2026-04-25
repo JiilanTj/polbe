@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { db } from "../../db";
-import { topupRequests, lifePackages, users, livesTransactions, referralEarnings, notifications } from "../../db/schema";
+import { adminAuditLogs, topupRequests, lifePackages, users, livesTransactions, referralEarnings, notifications } from "../../db/schema";
 import { eq, desc, sql, and, gte } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { broadcastEvent } from "../../ws/handler";
@@ -12,6 +12,10 @@ import { topupCreateSchema } from "../../lib/schemas";
 const REFERRAL_FEE_RATE = 0.05;
 // 1 USDT = 1 live untuk konversi referral bonus
 const USDT_TO_LIVES = 1;
+
+function requestIp(c: Context) {
+  return c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? null;
+}
 
 /**
  * Kredit nyawa ke user dalam konteks tx (atau db langsung).
@@ -202,6 +206,22 @@ export const topupController = {
       return { newBalance, referrerId };
     });
 
+    await db.insert(adminAuditLogs).values({
+      adminId: Number(me.sub),
+      action: "approve_topup",
+      targetUserId: req.userId,
+      targetResourceId: req.id,
+      targetResourceType: "topup",
+      metadata: {
+        livesAmount: req.livesAmount,
+        usdtAmount: req.usdtAmount,
+        newBalance,
+        referrerId,
+        adminNote: body.adminNote ?? null,
+      },
+      ipAddress: requestIp(c),
+    });
+
     // ── Broadcast WS di luar transaction (non-critical) ────────────────────
     broadcastEvent("topup:approved", {
       userId: req.userId, livesAmount: req.livesAmount, newBalance,
@@ -240,6 +260,20 @@ export const topupController = {
         processedAt: new Date(),
       })
       .where(eq(topupRequests.id, id));
+
+    await db.insert(adminAuditLogs).values({
+      adminId: Number(me.sub),
+      action: "reject_topup",
+      targetUserId: req.userId,
+      targetResourceId: req.id,
+      targetResourceType: "topup",
+      metadata: {
+        livesAmount: req.livesAmount,
+        usdtAmount: req.usdtAmount,
+        adminNote: body.adminNote ?? null,
+      },
+      ipAddress: requestIp(c),
+    });
 
     broadcastEvent("topup:rejected", {
       userId: req.userId,

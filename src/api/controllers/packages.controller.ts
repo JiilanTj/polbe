@@ -1,8 +1,8 @@
 import type { Context } from "hono";
 import { db } from "../../db";
-import { lifePackages } from "../../db/schema";
+import { adminAuditLogs, lifePackages } from "../../db/schema";
 import { asc, eq, inArray } from "drizzle-orm";
-import { verifyAccessToken } from "../../lib/jwt";
+import { verifyAccessToken, type TokenPayload } from "../../lib/jwt";
 
 // Paket default sesuai spec klien
 const DEFAULT_PACKAGES = [
@@ -13,6 +13,10 @@ const DEFAULT_PACKAGES = [
   { label: "Elite",      usdtPrice: "100", livesAmount: 180,  sortOrder: 5 },
   { label: "Legend",     usdtPrice: "500", livesAmount: 1000, sortOrder: 6 },
 ];
+
+function requestIp(c: Context) {
+  return c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? null;
+}
 
 export const packagesController = {
   // GET /api/packages — publik
@@ -53,6 +57,7 @@ export const packagesController = {
 
   // POST /api/packages/seed — admin only, seed default packages
   async seed(c: Context) {
+    const me = c.get("user") as TokenPayload;
     const labels = DEFAULT_PACKAGES.map((pkg) => pkg.label);
     const existing = await db
       .select({ label: lifePackages.label })
@@ -70,11 +75,19 @@ export const packagesController = {
       .values(missing)
       .returning();
 
+    await db.insert(adminAuditLogs).values({
+      adminId: Number(me.sub),
+      action: "seed_life_packages",
+      metadata: { inserted: inserted.map((pkg) => ({ id: pkg.id, label: pkg.label })) },
+      ipAddress: requestIp(c),
+    });
+
     return c.json({ message: `Seeded ${inserted.length} packages`, data: inserted });
   },
 
   // POST /api/packages — admin, tambah paket custom
   async create(c: Context) {
+    const me = c.get("user") as TokenPayload;
     const body = await c.req.json().catch(() => null);
     if (!body) return c.json({ error: "Body tidak valid" }, 400);
 
@@ -96,11 +109,21 @@ export const packagesController = {
       })
       .returning();
 
+    if (pkg) {
+      await db.insert(adminAuditLogs).values({
+        adminId: Number(me.sub),
+        action: "create_life_package",
+        metadata: { packageId: pkg.id, label: pkg.label, usdtPrice: pkg.usdtPrice, livesAmount: pkg.livesAmount },
+        ipAddress: requestIp(c),
+      });
+    }
+
     return c.json({ data: pkg }, 201);
   },
 
   // PATCH /api/packages/:id — admin, toggle aktif/nonaktif
   async toggle(c: Context) {
+    const me = c.get("user") as TokenPayload;
     const id = Number(c.req.param("id"));
     const [pkg] = await db.select().from(lifePackages).where(eq(lifePackages.id, id));
     if (!pkg) return c.json({ error: "Package tidak ditemukan" }, 404);
@@ -110,6 +133,15 @@ export const packagesController = {
       .set({ isActive: !pkg.isActive })
       .where(eq(lifePackages.id, id))
       .returning();
+
+    if (updated) {
+      await db.insert(adminAuditLogs).values({
+        adminId: Number(me.sub),
+        action: updated.isActive ? "activate_life_package" : "deactivate_life_package",
+        metadata: { packageId: updated.id, label: updated.label, isActive: updated.isActive },
+        ipAddress: requestIp(c),
+      });
+    }
 
     return c.json({ data: updated });
   },

@@ -3,7 +3,10 @@ import type { Context, Next } from "hono";
 export async function loggerMiddleware(c: Context, next: Next) {
   const start = Date.now();
   const method = c.req.method;
-  const path = c.req.path;
+  const url = new URL(c.req.url);
+  const path = process.env.NODE_ENV === "production"
+    ? url.pathname
+    : `${url.pathname}${url.search}`;
 
   await next();
 

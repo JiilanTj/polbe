@@ -338,9 +338,17 @@ export const adminController = {
     const limit = Math.min(100, safeInt(c.req.query("limit") ?? "50") ?? 50);
     const offset = (page - 1) * limit;
     const adminId = safeInt(c.req.query("adminId") ?? "");
+    const action = c.req.query("action")?.trim();
+    const targetResourceType = c.req.query("targetResourceType")?.trim();
+    const targetUserId = safeInt(c.req.query("targetUserId") ?? "");
+    const targetResourceId = safeInt(c.req.query("targetResourceId") ?? "");
 
     const conditions: any[] = [];
     if (adminId) conditions.push(eq(adminAuditLogs.adminId, adminId));
+    if (action) conditions.push(ilike(adminAuditLogs.action, `%${action}%`));
+    if (targetResourceType) conditions.push(eq(adminAuditLogs.targetResourceType, targetResourceType));
+    if (targetUserId) conditions.push(eq(adminAuditLogs.targetUserId, targetUserId));
+    if (targetResourceId) conditions.push(eq(adminAuditLogs.targetResourceId, targetResourceId));
 
     const rows = await db
       .select({

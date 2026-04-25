@@ -10,6 +10,7 @@ mock.module("../../../src/db/schema", () => ({
   generatedQuestions: {},
   polls: {},
   livesTransactions: {},
+  adminAuditLogs: {},
 }));
 
 import { describe, expect, it } from "bun:test";

@@ -1,12 +1,16 @@
 import type { Context } from "hono";
 import { db } from "../../db";
-import { polls, pollVotes, users, livesTransactions, notifications, priceSnapshots } from "../../db/schema";
+import { adminAuditLogs, polls, pollVotes, users, livesTransactions, notifications, priceSnapshots } from "../../db/schema";
 import { eq, desc, sql, and, ilike, type SQL } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { verifyAccessToken } from "../../lib/jwt";
 import { broadcastEvent } from "../../ws/handler";
 import { parseBody, safeInt, escapeHtml } from "../../lib/validate";
 import { pollCreateSchema, pollVoteSchema, pollResolveSchema, pollStatusSchema } from "../../lib/schemas";
+
+function requestIp(c: Context) {
+  return c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? null;
+}
 
 // ─── Helper: kredit/debit nyawa + catat transaksi ──────────────────────────
 async function adjustLives(
@@ -217,11 +221,23 @@ export const pollsController = {
       })
       .returning();
 
+    if (poll) {
+      await db.insert(adminAuditLogs).values({
+        adminId: Number(me.sub),
+        action: "create_poll",
+        targetResourceId: poll.id,
+        targetResourceType: "poll",
+        metadata: { title: poll.title, status: poll.status, aiGenerated: poll.aiGenerated },
+        ipAddress: requestIp(c),
+      });
+    }
+
     return c.json({ data: poll }, 201);
   },
 
   // PATCH /api/polls/:id/status — admin ubah status
   async updateStatus(c: Context) {
+    const me = c.get("user") as TokenPayload;
     const id = safeInt(c.req.param("id"));
     if (!id) return c.json({ error: "ID poll tidak valid" }, 400);
 
@@ -242,6 +258,15 @@ export const pollsController = {
     if (status === "active" && poll.status !== "active") {
       broadcastEvent("poll:activated", { pollId: updated.id, title: updated.title }, "polls");
     }
+
+    await db.insert(adminAuditLogs).values({
+      adminId: Number(me.sub),
+      action: "change_poll_status",
+      targetResourceId: id,
+      targetResourceType: "poll",
+      metadata: { from: poll.status, to: status },
+      ipAddress: requestIp(c),
+    });
 
     return c.json({ data: updated });
   },
@@ -421,16 +446,36 @@ export const pollsController = {
       .set({ status: "resolved", winnerOptionIndex, resolvedAt: new Date(), resolvedBy: Number(me.sub) })
       .where(eq(polls.id, pollId));
 
+    await db.insert(adminAuditLogs).values({
+      adminId: Number(me.sub),
+      action: "resolve_poll",
+      targetResourceId: pollId,
+      targetResourceType: "poll",
+      metadata: { winnerOptionIndex, totalWinnersWagered, totalLosersWagered },
+      ipAddress: requestIp(c),
+    });
+
     broadcastEvent("poll:resolved", { pollId, winnerOptionIndex }, "polls");
 
     return c.json({ message: "Poll berhasil di-resolve!" });
   },
 
   async deletePoll(c: Context) {
+    const me = c.get("user") as TokenPayload;
     const id = safeInt(c.req.param("id"));
     if (!id) return c.json({ error: "ID poll tidak valid" }, 400);
+    const [poll] = await db.select({ id: polls.id, title: polls.title, status: polls.status }).from(polls).where(eq(polls.id, id));
+    if (!poll) return c.json({ error: "Poll tidak ditemukan" }, 404);
     await db.delete(pollVotes).where(eq(pollVotes.pollId, id));
     await db.delete(polls).where(eq(polls.id, id));
+    await db.insert(adminAuditLogs).values({
+      adminId: Number(me.sub),
+      action: "delete_poll",
+      targetResourceId: id,
+      targetResourceType: "poll",
+      metadata: { title: poll.title, status: poll.status },
+      ipAddress: requestIp(c),
+    });
     return c.json({ message: "Poll dihapus" });
   },
 

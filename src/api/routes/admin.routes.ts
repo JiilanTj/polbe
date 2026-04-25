@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { adminController } from "../controllers/admin.controller";
 import { authMiddleware, requireRole } from "../middlewares/auth.middleware";
-import { defaultRateLimit } from "../middlewares/rate-limit.middleware";
+import { adminMutationRateLimit, defaultRateLimit } from "../middlewares/rate-limit.middleware";
 
 export const adminRoutes = new Hono();
 
@@ -10,9 +10,9 @@ adminRoutes.use("/*", authMiddleware, requireRole("admin"), defaultRateLimit);
 adminRoutes.get("/stats", adminController.stats);
 adminRoutes.get("/users", adminController.listUsers);
 adminRoutes.get("/users/:id", adminController.getUser);
-adminRoutes.patch("/users/:id/toggle", adminController.toggleUser);
-adminRoutes.patch("/users/:id/role", adminController.changeRole);
-adminRoutes.post("/users/:id/credit", adminController.creditLives);
+adminRoutes.patch("/users/:id/toggle", adminMutationRateLimit, adminController.toggleUser);
+adminRoutes.patch("/users/:id/role", adminMutationRateLimit, adminController.changeRole);
+adminRoutes.post("/users/:id/credit", adminMutationRateLimit, adminController.creditLives);
 
 // ─── Audit endpoints ────────────────────────────────────────────────────────
 adminRoutes.get("/orders", adminController.listOrders);
@@ -22,4 +22,4 @@ adminRoutes.get("/audit-logs", adminController.listAuditLogs);
 
 // ─── Platform Settings ───────────────────────────────────────────────────────
 adminRoutes.get("/settings", adminController.getSettings);
-adminRoutes.patch("/settings/withdrawal-fee", adminController.updateWithdrawalFee);
+adminRoutes.patch("/settings/withdrawal-fee", adminMutationRateLimit, adminController.updateWithdrawalFee);

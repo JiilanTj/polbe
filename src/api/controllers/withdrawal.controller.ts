@@ -1,11 +1,15 @@
 import type { Context } from "hono";
 import { db } from "../../db";
-import { withdrawalRequests, users, platformSettings } from "../../db/schema";
+import { adminAuditLogs, withdrawalRequests, users, platformSettings } from "../../db/schema";
 import { eq, desc, sql, and, gte } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { broadcastEvent } from "../../ws/handler";
 import { parseBody, safeInt } from "../../lib/validate";
 import { withdrawalCreateSchema } from "../../lib/schemas";
+
+function requestIp(c: Context) {
+  return c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? null;
+}
 
 export const withdrawalController = {
   // POST /api/withdrawal — user minta tarik saldo USDT
@@ -151,6 +155,21 @@ export const withdrawalController = {
       .where(eq(withdrawalRequests.id, id))
       .returning();
 
+    await db.insert(adminAuditLogs).values({
+      adminId: Number(me.sub),
+      action: "approve_withdrawal",
+      targetUserId: req.userId,
+      targetResourceId: req.id,
+      targetResourceType: "withdrawal",
+      metadata: {
+        usdtAmount: req.usdtAmount,
+        netAmount: req.netAmount,
+        txHash: body.txHash ?? null,
+        adminNote: body.adminNote ?? null,
+      },
+      ipAddress: requestIp(c),
+    });
+
     broadcastEvent("withdrawal:approved", {
       userId: req.userId,
       withdrawalId: id,
@@ -198,6 +217,20 @@ export const withdrawalController = {
       .update(users)
       .set({ usdtBalance: sql`usdt_balance + ${req.usdtAmount}` })
       .where(eq(users.id, req.userId));
+
+    await db.insert(adminAuditLogs).values({
+      adminId: Number(me.sub),
+      action: "reject_withdrawal",
+      targetUserId: req.userId,
+      targetResourceId: req.id,
+      targetResourceType: "withdrawal",
+      metadata: {
+        usdtAmount: req.usdtAmount,
+        netAmount: req.netAmount,
+        adminNote: body.adminNote ?? null,
+      },
+      ipAddress: requestIp(c),
+    });
 
     broadcastEvent("withdrawal:rejected", {
       userId: req.userId,

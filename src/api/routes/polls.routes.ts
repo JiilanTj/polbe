@@ -3,7 +3,7 @@ import { pollsController } from "../controllers/polls.controller";
 import { ordersController } from "../controllers/orders.controller";
 import { commentsController } from "../controllers/comments.controller";
 import { authMiddleware, requireRole } from "../middlewares/auth.middleware";
-import { voteRateLimit } from "../middlewares/rate-limit.middleware";
+import { adminMutationRateLimit, voteRateLimit } from "../middlewares/rate-limit.middleware";
 
 export const pollsRoutes = new Hono();
 
@@ -29,7 +29,7 @@ pollsRoutes.post("/:id/comments", authMiddleware, commentsController.create);
 pollsRoutes.delete("/:id/comments/:commentId", authMiddleware, commentsController.deleteComment);
 
 // Admin/platform — kelola poll
-pollsRoutes.post("/", authMiddleware, requireRole("admin", "platform"), pollsController.create);
-pollsRoutes.patch("/:id/status", authMiddleware, requireRole("admin"), pollsController.updateStatus);
-pollsRoutes.patch("/:id/resolve", authMiddleware, requireRole("admin"), pollsController.resolve);
-pollsRoutes.delete("/:id", authMiddleware, requireRole("admin"), pollsController.deletePoll);
+pollsRoutes.post("/", authMiddleware, requireRole("admin", "platform"), adminMutationRateLimit, pollsController.create);
+pollsRoutes.patch("/:id/status", authMiddleware, requireRole("admin"), adminMutationRateLimit, pollsController.updateStatus);
+pollsRoutes.patch("/:id/resolve", authMiddleware, requireRole("admin"), adminMutationRateLimit, pollsController.resolve);
+pollsRoutes.delete("/:id", authMiddleware, requireRole("admin"), adminMutationRateLimit, pollsController.deletePoll);

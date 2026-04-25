@@ -18,6 +18,22 @@ mock.module("drizzle-orm", () => ({
   sql: Object.assign((_t: TemplateStringsArray, ..._v: unknown[]) => ({}), { raw: () => ({}) }),
 }));
 
+const schemaMock = {
+  adminAuditLogs: {},
+  articles: { title: "title", description: "description", scrapedAt: "scrapedAt" },
+  generatedQuestions: {
+    id: "id",
+    status: "status",
+    category: "category",
+    marketType: "marketType",
+    createdAt: "createdAt",
+  },
+  polls: { id: "id", title: "title" },
+};
+
+mock.module("../../../../src/db/schema", () => schemaMock);
+mock.module("../../../../src/db/schema.ts", () => schemaMock);
+
 const mockGeneratedQs = [
   {
     question: "Will the Fed cut rates in Q3 2026?",

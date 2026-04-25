@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { db } from "../../db";
-import { articles, generatedQuestions, polls } from "../../db/schema";
+import { adminAuditLogs, articles, generatedQuestions, polls } from "../../db/schema";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { generateQuestions } from "../../ai/question-generator";
 import { config } from "../../config";
@@ -13,6 +13,10 @@ const VALID_STATUSES = ["draft", "pending", "active", "resolved", "closed"] as c
 
 type MarketType = (typeof VALID_MARKET_TYPES)[number];
 type QuestionStatus = (typeof VALID_STATUSES)[number];
+
+function requestIp(c: Context) {
+  return c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? null;
+}
 
 function toSlug(text: string): string {
   return (
@@ -70,6 +74,7 @@ export const questionsController = {
   },
 
   async create(c: Context) {
+    const me = c.get("user") as TokenPayload | undefined;
     const body = await c.req.json().catch(() => null);
     if (!body) return c.json({ error: "Request body tidak valid (harus JSON)" }, 400);
 
@@ -148,10 +153,22 @@ export const questionsController = {
       })
       .returning();
 
+    if (created && me) {
+      await db.insert(adminAuditLogs).values({
+        adminId: Number(me.sub),
+        action: "create_generated_question",
+        targetResourceId: created.id,
+        targetResourceType: "generated_question",
+        metadata: { question: created.question, status: created.status, marketType: created.marketType },
+        ipAddress: requestIp(c),
+      });
+    }
+
     return c.json({ data: created }, 201);
   },
 
   async updateStatus(c: Context) {
+    const me = c.get("user") as TokenPayload | undefined;
     const id = Number(c.req.param("id"));
     if (!id || isNaN(id)) return c.json({ error: "ID tidak valid" }, 400);
 
@@ -192,6 +209,17 @@ export const questionsController = {
       })
       .where(eq(generatedQuestions.id, id))
       .returning();
+
+    if (updated && me) {
+      await db.insert(adminAuditLogs).values({
+        adminId: Number(me.sub),
+        action: "change_generated_question_status",
+        targetResourceId: id,
+        targetResourceType: "generated_question",
+        metadata: { from: existing.status, to: status, note: note ?? null },
+        ipAddress: requestIp(c),
+      });
+    }
 
     return c.json({
       message: `Status question #${id} diubah ke '${status}'${note ? ` — ${note}` : ""}`,
@@ -253,6 +281,15 @@ export const questionsController = {
       return [createdPoll];
     });
     if (!poll) return c.json({ error: "Gagal membuat poll" }, 500);
+
+    await db.insert(adminAuditLogs).values({
+      adminId: Number(me.sub),
+      action: "make_poll_from_question",
+      targetResourceId: poll.id,
+      targetResourceType: "poll",
+      metadata: { questionId: id, question: question.question, status: "active" },
+      ipAddress: requestIp(c),
+    });
 
     broadcastEvent("poll:created", { pollId: poll.id, questionId: id, status: "active" }, "polls");
 
