@@ -1,9 +1,12 @@
 import type { Context } from "hono";
 import { db } from "../../db";
-import { articles, generatedQuestions } from "../../db/schema";
+import { articles, generatedQuestions, polls } from "../../db/schema";
 import { desc, eq, sql } from "drizzle-orm";
 import { generateQuestions } from "../../ai/question-generator";
 import { config } from "../../config";
+import type { TokenPayload } from "../../lib/jwt";
+import { escapeHtml } from "../../lib/validate";
+import { broadcastEvent } from "../../ws/handler";
 
 const VALID_MARKET_TYPES = ["binary", "categorical", "scalar"] as const;
 const VALID_STATUSES = ["draft", "pending", "active", "resolved", "closed"] as const;
@@ -196,6 +199,68 @@ export const questionsController = {
       message: `Status question #${id} diubah ke '${status}'${note ? ` — ${note}` : ""}`,
       data: updated,
     });
+  },
+
+  async makePoll(c: Context) {
+    const me = c.get("user") as TokenPayload;
+    const id = Number(c.req.param("id"));
+    if (!id || isNaN(id)) return c.json({ error: "ID tidak valid" }, 400);
+
+    const [question] = await db.select().from(generatedQuestions).where(eq(generatedQuestions.id, id));
+    if (!question) return c.json({ error: "Question tidak ditemukan" }, 404);
+
+    const outcomes = question.outcomes ?? (question.marketType === "binary" ? ["Yes", "No"] : null);
+    if (!outcomes || outcomes.length < 2) {
+      return c.json({ error: "Question harus punya minimal 2 outcomes untuk dijadikan poll" }, 422);
+    }
+
+    const [existingPoll] = await db
+      .select({ id: polls.id })
+      .from(polls)
+      .where(eq(polls.title, question.question))
+      .limit(1);
+    if (existingPoll) {
+      return c.json({ error: `Question ini sudah pernah dibuat menjadi poll #${existingPoll.id}` }, 409);
+    }
+
+    const [poll] = await db.transaction(async (tx) => {
+      const [createdPoll] = await tx
+        .insert(polls)
+        .values({
+          title: escapeHtml(question.question.trim()),
+          description: question.description ? escapeHtml(question.description) : null,
+          category: question.category ?? null,
+          options: outcomes.map((outcome) => escapeHtml(outcome)),
+          imageUrl: question.imageUrl ?? null,
+          status: "active",
+          creatorId: Number(me.sub),
+          aiGenerated: true,
+          sourceArticleIds: Array.isArray(question.sourceArticleIds) ? question.sourceArticleIds : null,
+          startAt: question.startDate ?? new Date(),
+          endAt: question.resolutionDate ?? null,
+          livesPerVote: 1,
+          platformFeePercent: "30",
+        })
+        .returning();
+
+      await tx
+        .update(generatedQuestions)
+        .set({
+          status: "active",
+          startDate: question.startDate ?? new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(generatedQuestions.id, id));
+
+      return [createdPoll];
+    });
+
+    broadcastEvent("poll:created", { pollId: poll.id, questionId: id, status: "active" }, "polls");
+
+    return c.json({
+      message: `Question #${id} berhasil dibuat menjadi poll aktif #${poll.id}`,
+      data: poll,
+    }, 201);
   },
 
   async generate(c: Context) {

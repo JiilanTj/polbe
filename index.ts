@@ -76,6 +76,7 @@ app.get("/", (c) => {
 // ─── Bun Server with WebSocket ───────────────────────────────
 const server = Bun.serve({
   port: config.server.port,
+  idleTimeout: 60,
   fetch(req, server) {
     const url = new URL(req.url);
 
