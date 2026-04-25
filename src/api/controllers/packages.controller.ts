@@ -1,7 +1,8 @@
 import type { Context } from "hono";
 import { db } from "../../db";
 import { lifePackages } from "../../db/schema";
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
+import { verifyAccessToken } from "../../lib/jwt";
 
 // Paket default sesuai spec klien
 const DEFAULT_PACKAGES = [
@@ -16,6 +17,31 @@ const DEFAULT_PACKAGES = [
 export const packagesController = {
   // GET /api/packages — publik
   async list(c: Context) {
+    const includeInactive = c.req.query("includeInactive") === "true";
+
+    if (includeInactive) {
+      const authorization = c.req.header("Authorization");
+      if (!authorization?.startsWith("Bearer ")) {
+        return c.json({ error: "Missing or invalid Authorization header" }, 401);
+      }
+
+      try {
+        const payload = await verifyAccessToken(authorization.slice(7));
+        if (payload.role !== "admin") {
+          return c.json({ error: "Insufficient permissions" }, 403);
+        }
+      } catch {
+        return c.json({ error: "Token expired or invalid" }, 401);
+      }
+
+      const rows = await db
+        .select()
+        .from(lifePackages)
+        .orderBy(asc(lifePackages.sortOrder));
+
+      return c.json({ data: rows });
+    }
+
     const rows = await db
       .select()
       .from(lifePackages)
@@ -27,10 +53,21 @@ export const packagesController = {
 
   // POST /api/packages/seed — admin only, seed default packages
   async seed(c: Context) {
+    const labels = DEFAULT_PACKAGES.map((pkg) => pkg.label);
+    const existing = await db
+      .select({ label: lifePackages.label })
+      .from(lifePackages)
+      .where(inArray(lifePackages.label, labels));
+    const existingLabels = new Set(existing.map((pkg) => pkg.label));
+    const missing = DEFAULT_PACKAGES.filter((pkg) => !existingLabels.has(pkg.label));
+
+    if (missing.length === 0) {
+      return c.json({ message: "Default packages already exist", data: [] });
+    }
+
     const inserted = await db
       .insert(lifePackages)
-      .values(DEFAULT_PACKAGES)
-      .onConflictDoNothing()
+      .values(missing)
       .returning();
 
     return c.json({ message: `Seeded ${inserted.length} packages`, data: inserted });
