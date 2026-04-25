@@ -82,7 +82,7 @@ export const authController = {
         username,
         passwordHash,
         role: assignedRole,
-        livesBalance: 5,           // 5 nyawa gratis untuk akun baru
+        livesBalance: "5",         // 5 nyawa gratis untuk akun baru
         livesRecoveryAt: recoveryAt,
         referralCode: newReferralCode,
         referredBy: referredById ?? undefined,

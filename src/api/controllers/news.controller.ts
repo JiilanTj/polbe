@@ -48,10 +48,15 @@ export const newsController = {
       || article.content.length < 300;
 
     if (needsEnrich) {
-      const fullContent = await scrapeArticleContent(article.url);
-      if (fullContent && fullContent.length > (article.content?.length ?? 0)) {
-        await db.update(articles).set({ content: fullContent }).where(eq(articles.id, id));
-        article.content = fullContent;
+      const enriched = await scrapeArticleContent(article.url);
+      const content = enriched?.content;
+      if (content && content.length > (article.content?.length ?? 0)) {
+        await db.update(articles).set({
+          content,
+          imageUrl: enriched.imageUrl ?? article.imageUrl,
+        }).where(eq(articles.id, id));
+        article.content = content;
+        article.imageUrl = enriched.imageUrl ?? article.imageUrl;
       }
     }
 

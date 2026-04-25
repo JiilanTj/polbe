@@ -8,6 +8,8 @@ mock.module("../../../src/db/schema", () => ({
   trends: {},
   users: {},
   generatedQuestions: {},
+  polls: {},
+  livesTransactions: {},
 }));
 
 import { describe, expect, it } from "bun:test";

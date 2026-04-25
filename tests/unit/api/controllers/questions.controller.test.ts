@@ -5,17 +5,14 @@ import { makeChain } from "../../../helpers/db-mock";
 
 const mockSelect = mock(() => makeChain([]));
 const mockInsert = mock(() => makeChain([]));
+const mockUpdate = mock(() => makeChain([]));
 
 mock.module("../../../../src/db", () => ({
-  db: { select: mockSelect, insert: mockInsert },
-}));
-
-mock.module("../../../../src/db/schema", () => ({
-  articles: { id: "id", title: "title", description: "description", scrapedAt: "scrapedAt" },
-  generatedQuestions: { id: "id", status: "status", createdAt: "createdAt" },
+  db: { select: mockSelect, insert: mockInsert, update: mockUpdate, transaction: async (fn: any) => fn({ insert: mockInsert, update: mockUpdate }) },
 }));
 
 mock.module("drizzle-orm", () => ({
+  and: (..._a: unknown[]) => ({}),
   eq: (..._a: unknown[]) => ({}),
   desc: (..._a: unknown[]) => ({}),
   sql: Object.assign((_t: TemplateStringsArray, ..._v: unknown[]) => ({}), { raw: () => ({}) }),
@@ -53,7 +50,7 @@ mock.module("../../../../src/config", () => ({
 // ─── Imports ──────────────────────────────────────────────────────────────────
 
 import { Hono } from "hono";
-import { questionsController } from "../../../../src/api/controllers/questions.controller";
+const { questionsController } = await import("../../../../src/api/controllers/questions.controller");
 
 const j = (r: Response) => r.json() as Promise<any>;
 

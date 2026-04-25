@@ -90,15 +90,19 @@ Format selalu: { "event": "<nama>", "data": { ... } }
     Trigger : Admin mengubah status poll ke "active"
     { "event": "poll:activated", "data": { "pollId": 7, "title": "..." } }
 
+  poll:created
+    Trigger : Poll baru dibuat/diaktifkan oleh sistem
+    { "event": "poll:created", "data": { "pollId": 1, "questionId": 2, "status": "active" } }
+
   poll:vote_cast
     Trigger : User berhasil vote di poll
-    { "event": "poll:vote_cast", "data": { "pollId": 7, "optionIndex": 1, "totalVotes": 42 } }
+    { "event": "poll:vote_cast", "data": { "pollId": 7, "optionIndex": 1, "livesWagered": 1, "totalVotes": 42 } }
 
   poll:resolved
     Trigger : Admin me-resolve poll (menentukan pemenang)
     {
       "event": "poll:resolved",
-      "data": { "pollId": 7, "winnerOptionIndex": 0, "totalPayout": 1500 }
+      "data": { "pollId": 7, "winnerOptionIndex": 0 }
     }
 
   poll:closed
@@ -116,8 +120,7 @@ Format selalu: { "event": "<nama>", "data": { ... } }
         "optionIndex"  : 0,
         "price"        : "0.6500",
         "size"         : 10,
-        "makerUserId"  : 3,
-        "takerUserId"  : 5
+        "side"         : "buy"
       }
     }
 
@@ -135,14 +138,14 @@ Format selalu: { "event": "<nama>", "data": { ... } }
     Trigger : Admin approve request topup nyawa
     {
       "event": "topup:approved",
-      "data": { "topupId": 3, "livesAmount": 15, "usdtAmount": "10.00" }
+      "data": { "userId": 1, "livesAmount": 15, "newBalance": 20 }
     }
 
   topup:rejected
     Trigger : Admin reject request topup
     {
       "event": "topup:rejected",
-      "data": { "topupId": 3, "adminNote": "Bukti tidak valid" }
+      "data": { "topupId": 3, "note": "Bukti tidak valid" }
     }
 
   withdrawal:approved
@@ -160,7 +163,7 @@ Format selalu: { "event": "<nama>", "data": { ... } }
     Trigger : Admin reject request withdrawal
     {
       "event": "withdrawal:rejected",
-      "data": { "withdrawalId": 2, "adminNote": "Alamat wallet tidak valid" }
+      "data": { "userId": 1, "withdrawalId": 2, "usdtRefunded": "99.00", "note": "Alamat wallet tidak valid" }
     }
 
 

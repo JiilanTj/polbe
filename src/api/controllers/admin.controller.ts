@@ -35,6 +35,14 @@ export const adminController = {
     const offset = (page - 1) * limit;
     const search = c.req.query("search")?.trim();
     const role = c.req.query("role");
+    const conditions: any[] = [];
+
+    if (search) {
+      conditions.push(or(ilike(users.email, `%${search}%`), ilike(users.username, `%${search}%`)));
+    }
+    if (role) {
+      conditions.push(eq(users.role, role as any));
+    }
 
     let query = db
       .select({
@@ -51,22 +59,17 @@ export const adminController = {
         updatedAt: users.updatedAt,
       })
       .from(users)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(users.createdAt))
       .limit(limit)
       .offset(offset);
 
-    if (search) {
-      query = query.where(
-        or(ilike(users.email, `%${search}%`), ilike(users.username, `%${search}%`)),
-      ) as typeof query;
-    }
-    if (role) {
-      query = query.where(eq(users.role, role as any)) as typeof query;
-    }
-
     const rows = await query;
 
-    const countResult = await db.select({ total: sql<number>`count(*)` }).from(users);
+    const countResult = await db
+      .select({ total: sql<number>`count(*)` })
+      .from(users)
+      .where(conditions.length > 0 ? and(...conditions) : undefined);
     const total = countResult[0]?.total ?? 0;
 
     return c.json({
@@ -255,7 +258,18 @@ export const adminController = {
       .limit(limit)
       .offset(offset);
 
-    return c.json({ data: rows, page, limit });
+    const [countResult] = await db
+      .select({ total: sql<number>`count(*)` })
+      .from(orders)
+      .where(conditions.length > 0 ? and(...conditions) : undefined);
+    const total = Number(countResult?.total ?? 0);
+
+    return c.json({
+      data: rows,
+      page,
+      limit,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    });
   },
 
   // GET /api/admin/positions — semua posisi dengan filter

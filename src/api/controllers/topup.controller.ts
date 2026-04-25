@@ -33,12 +33,12 @@ async function creditLivesTx(
 
   if (!current) throw new Error("User tidak ditemukan");
 
-  const balanceAfter = current.livesBalance + amount;
+  const balanceAfter = Number(current.livesBalance) + amount;
 
-  await tx.update(users).set({ livesBalance: balanceAfter }).where(eq(users.id, userId));
+  await tx.update(users).set({ livesBalance: balanceAfter.toString() }).where(eq(users.id, userId));
 
   await tx.insert(livesTransactions).values({
-    userId, amount, type, refId, refType, note, balanceAfter,
+    userId, amount: amount.toString(), type, refId, refType, note, balanceAfter: balanceAfter.toString(),
   });
 
   return balanceAfter;

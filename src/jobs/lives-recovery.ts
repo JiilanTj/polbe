@@ -25,7 +25,7 @@ export async function runLivesRecovery(): Promise<void> {
     const batch = await db
       .select({ id: users.id, livesBalance: users.livesBalance })
       .from(users)
-      .where(and(lte(users.livesRecoveryAt, now), lt(users.livesBalance, MAX_LIVES)))
+      .where(and(lte(users.livesRecoveryAt, now), lt(users.livesBalance, MAX_LIVES.toString())))
       .limit(BATCH_SIZE)
       .offset(offset);
 
@@ -45,12 +45,12 @@ export async function runLivesRecovery(): Promise<void> {
     // Catat transaksi recovery untuk setiap user
     const txRows = batch.map((u) => ({
       userId: u.id,
-      amount: RECOVERY_LIVES,
+      amount: RECOVERY_LIVES.toString(),
       type: "recovery" as const,
       refId: null,
       refType: "auto_recovery",
       note: `Auto-recovery +${RECOVERY_LIVES} nyawa`,
-      balanceAfter: u.livesBalance + RECOVERY_LIVES,
+      balanceAfter: (Number(u.livesBalance) + RECOVERY_LIVES).toString(),
     }));
 
     if (txRows.length > 0) {

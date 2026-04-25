@@ -9,11 +9,6 @@ mock.module("../../../../src/db", () => ({
   db: { select: mockSelect },
 }));
 
-mock.module("../../../../src/db/schema", () => ({
-  trends: { id: "id", topic: "topic", mentionCount: "mentionCount", trendScore: "trendScore", category: "category", firstSeen: "firstSeen", lastSeen: "lastSeen" },
-  articles: { id: "id", title: "title", scrapedAt: "scrapedAt" },
-}));
-
 mock.module("drizzle-orm", () => ({
   eq: (..._a: unknown[]) => ({}),
   desc: (..._a: unknown[]) => ({}),

@@ -1,7 +1,15 @@
-import { describe, expect, it, beforeEach } from "bun:test";
+import { describe, expect, it, beforeEach, mock } from "bun:test";
 import { Hono } from "hono";
 import { signAccessToken, type TokenPayload } from "../../../../src/lib/jwt";
-import { authMiddleware, requireRole } from "../../../../src/api/middlewares/auth.middleware";
+import { makeChain } from "../../../helpers/db-mock";
+
+const mockSelect = mock(() => makeChain([{ isActive: true }]));
+
+mock.module("../../../../src/db", () => ({
+  db: { select: mockSelect },
+}));
+
+const { authMiddleware, requireRole } = await import("../../../../src/api/middlewares/auth.middleware");
 
 type AppVars = { Variables: { user: TokenPayload } };
 type App = Hono<AppVars>;
@@ -48,6 +56,8 @@ describe("authMiddleware", () => {
 
   beforeEach(() => {
     app = makeApp();
+    mockSelect.mockReset();
+    mockSelect.mockReturnValue(makeChain([{ isActive: true }]));
   });
 
   it("returns 401 when Authorization header is missing", async () => {
@@ -98,6 +108,8 @@ describe("requireRole", () => {
 
   beforeEach(() => {
     app = makeApp();
+    mockSelect.mockReset();
+    mockSelect.mockReturnValue(makeChain([{ isActive: true }]));
   });
 
   it("returns 403 when authenticated user lacks required role", async () => {

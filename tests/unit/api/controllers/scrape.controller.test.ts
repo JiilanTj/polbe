@@ -12,7 +12,7 @@ mock.module("../../../../src/jobs/scheduler", () => ({
 // ─── Imports ──────────────────────────────────────────────────────────────────
 
 import { Hono } from "hono";
-import { scrapeController } from "../../../../src/api/controllers/scrape.controller";
+const { scrapeController } = await import("../../../../src/api/controllers/scrape.controller");
 
 const j = (r: Response) => r.json() as Promise<any>;
 

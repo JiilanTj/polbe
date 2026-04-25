@@ -10,10 +10,6 @@ mock.module("../../../../src/db", () => ({
   db: { select: mockSelect, update: mockUpdate },
 }));
 
-mock.module("../../../../src/db/schema", () => ({
-  articles: { id: "id", title: "title", content: "content", url: "url", source: "source", category: "category", scrapedAt: "scrapedAt" },
-}));
-
 mock.module("drizzle-orm", () => ({
   eq: (..._a: unknown[]) => ({}),
   desc: (..._a: unknown[]) => ({}),

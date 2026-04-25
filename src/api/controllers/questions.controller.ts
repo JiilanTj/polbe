@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import { db } from "../../db";
 import { articles, generatedQuestions, polls } from "../../db/schema";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { generateQuestions } from "../../ai/question-generator";
 import { config } from "../../config";
 import type { TokenPayload } from "../../lib/jwt";
@@ -35,26 +35,24 @@ export const questionsController = {
     const category = c.req.query("category");
     const marketType = c.req.query("marketType");
     const offset = (page - 1) * limit;
+    const conditions: any[] = [];
+    if (status) conditions.push(eq(generatedQuestions.status, status as QuestionStatus));
+    if (category) conditions.push(eq(generatedQuestions.category, category));
+    if (marketType) conditions.push(eq(generatedQuestions.marketType, marketType as MarketType));
 
     let query = db
       .select()
       .from(generatedQuestions)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(generatedQuestions.createdAt))
       .limit(limit)
       .offset(offset);
 
-    if (status) {
-      query = query.where(eq(generatedQuestions.status, status as QuestionStatus)) as typeof query;
-    }
-    if (category) {
-      query = query.where(eq(generatedQuestions.category, category)) as typeof query;
-    }
-    if (marketType) {
-      query = query.where(eq(generatedQuestions.marketType, marketType as MarketType)) as typeof query;
-    }
-
     const result = await query;
-    const [countResult] = await db.select({ count: sql<number>`count(*)` }).from(generatedQuestions);
+    const [countResult] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(generatedQuestions)
+      .where(conditions.length > 0 ? and(...conditions) : undefined);
     const total = Number(countResult?.count ?? 0);
 
     return c.json({
@@ -254,6 +252,7 @@ export const questionsController = {
 
       return [createdPoll];
     });
+    if (!poll) return c.json({ error: "Gagal membuat poll" }, 500);
 
     broadcastEvent("poll:created", { pollId: poll.id, questionId: id, status: "active" }, "polls");
 

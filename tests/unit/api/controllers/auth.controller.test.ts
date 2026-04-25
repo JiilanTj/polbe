@@ -13,10 +13,6 @@ mock.module("../../../../src/db", () => ({
   db: { select: mockSelect, insert: mockInsert, update: mockUpdate },
 }));
 
-mock.module("../../../../src/db/schema", () => ({
-  users: { id: "id", email: "email", username: "username", role: "role", isActive: "isActive", createdAt: "createdAt" },
-}));
-
 mock.module("drizzle-orm", () => ({
   eq: (..._args: unknown[]) => ({}),
   desc: (..._args: unknown[]) => ({}),
@@ -118,25 +114,25 @@ describe("authController.register", () => {
 
   it("returns 400 when email is missing", async () => {
     const res = await app.request("/register", jsonRequest({ username: "u", password: "pass1234" }));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
     expect((await j(res)).error).toBeDefined();
   });
 
   it("returns 400 when password is missing", async () => {
     const res = await app.request("/register", jsonRequest({ email: "a@b.com", username: "u" }));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 
   it("returns 400 for invalid email format", async () => {
     const res = await app.request("/register", jsonRequest({ email: "not-an-email", username: "u", password: "pass1234" }));
-    expect(res.status).toBe(400);
-    expect((await j(res)).error).toMatch(/email/i);
+    expect(res.status).toBe(422);
+    expect((await j(res)).details?.email?.join(" ")).toMatch(/email/i);
   });
 
   it("returns 400 when password is shorter than 8 characters", async () => {
     const res = await app.request("/register", jsonRequest({ email: "a@b.com", username: "u", password: "short" }));
-    expect(res.status).toBe(400);
-    expect((await j(res)).error).toMatch(/8/);
+    expect(res.status).toBe(422);
+    expect((await j(res)).details?.password?.join(" ")).toMatch(/8/);
   });
 
   it("returns 409 when email is already registered", async () => {
@@ -165,7 +161,7 @@ describe("authController.register", () => {
     const res = await app.request("/register", jsonRequest({ email: "new@b.com", username: "newuser", password: "pass1234" }));
     expect(res.status).toBe(201);
     const body = await j(res);
-    expect(body.message).toMatch(/success/i);
+    expect(body.message).toMatch(/berhasil|success/i);
     expect(body.data).toBeDefined();
 
     hashSpy.mockRestore();
@@ -202,12 +198,12 @@ describe("authController.login", () => {
 
   it("returns 400 when email is missing", async () => {
     const res = await app.request("/login", jsonRequest({ password: "pass" }));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 
   it("returns 400 when password is missing", async () => {
     const res = await app.request("/login", jsonRequest({ email: "a@b.com" }));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 
   it("returns 401 when user is not found", async () => {
@@ -241,7 +237,8 @@ describe("authController.login", () => {
 
     const body = await j(res);
     expect(typeof body.data.accessToken).toBe("string");
-    expect(typeof body.data.refreshToken).toBe("string");
+    expect(body.data.refreshToken).toBeUndefined();
+    expect(res.headers.get("set-cookie")).toContain("refresh_token=");
     expect(body.data.user.id).toBe(TEST_USER_ID);
     expect(body.data.user.email).toBe("user@example.com");
 
@@ -295,7 +292,8 @@ describe("authController.refresh", () => {
     expect(res.status).toBe(200);
     const body = await j(res);
     expect(typeof body.data.accessToken).toBe("string");
-    expect(typeof body.data.refreshToken).toBe("string");
+    expect(body.data.refreshToken).toBeUndefined();
+    expect(res.headers.get("set-cookie")).toContain("refresh_token=");
     expect(mockRedisDel).toHaveBeenCalled();
     expect(mockRedisSet).toHaveBeenCalled();
   });

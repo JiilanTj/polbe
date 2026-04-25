@@ -57,6 +57,7 @@ paths:
     post:
       tags: [Auth]
       summary: Register a new user
+      description: Validasi request body menggunakan Zod. Jika gagal validasi, API mengembalikan 422.
       requestBody:
         required: true
         content:
@@ -103,6 +104,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "422":
+          description: Zod validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "409":
           description: Email or username already exists
           content:
@@ -114,6 +121,9 @@ paths:
     post:
       tags: [Auth]
       summary: Login and receive tokens
+      description: |
+        Login menerima `email` dan `password` via JSON body.
+        Jika berhasil, refresh token diset sebagai HttpOnly cookie (`refresh_token`) dan access token dikembalikan di response body.
       requestBody:
         required: true
         content:
@@ -162,6 +172,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "422":
+          description: Zod validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /api/auth/refresh:
     post:
@@ -169,6 +185,7 @@ paths:
       summary: Refresh access token
       description: |
         Rotates access token menggunakan refresh token dari HttpOnly cookie (`refresh_token`).
+        Endpoint ini tidak menggunakan request body sebagai sumber token utama.
         Cookie dikirim otomatis oleh browser — tidak perlu request body.
         Cookie baru dikirim kembali otomatis. Refresh token lama direvoke dari Redis.
       responses:
@@ -460,7 +477,9 @@ paths:
     get:
       tags: [Questions]
       summary: List questions
-      description: Returns paginated list of Polymarket-style prediction questions (AI-generated + manual).
+      description: |
+        Returns paginated list of Polymarket-style prediction questions (AI-generated + manual).
+        Nilai `pagination.total` dan `pagination.totalPages` dihitung berdasarkan filter aktif (mis. `status`, `category`, `marketType`).
       parameters:
         - name: page
           in: query
@@ -748,7 +767,18 @@ paths:
     get:
       tags: [Packages]
       summary: Daftar paket nyawa (publik)
-      description: Mengembalikan semua paket nyawa yang aktif, diurutkan dari harga terkecil.
+      description: |
+        Mengembalikan paket nyawa diurutkan dari harga terkecil.
+        Default hanya paket aktif.
+        Admin dapat mengirim `includeInactive=true` untuk ikut menampilkan paket nonaktif.
+      parameters:
+        - name: includeInactive
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Hanya untuk admin. Jika `true`, hasil mencakup paket nonaktif.
       responses:
         "200":
           description: Daftar paket nyawa
@@ -839,7 +869,7 @@ paths:
     patch:
       tags: [Packages]
       summary: Toggle aktif/nonaktif paket
-      description: Hanya **admin**. Membalik nilai `isActive`.
+      description: Hanya **admin**. Membalik nilai `isActive` dan mengembalikan status terbaru paket.
       security:
         - bearerAuth: []
       parameters:
@@ -862,6 +892,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -2514,6 +2546,7 @@ paths:
     get:
       tags: [Admin]
       summary: List semua user (dengan search & filter)
+      description: Nilai `pagination.total` dan `pagination.totalPages` dihitung berdasarkan filter aktif (`search`, `role`).
       security:
         - bearerAuth: []
       parameters:
@@ -2535,6 +2568,17 @@ paths:
       responses:
         "200":
           description: Daftar user dengan pagination
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/UserPublic"
+                  pagination:
+                    $ref: "#/components/schemas/Pagination"
         "401":
           description: Unauthorized
         "403":
@@ -2641,6 +2685,7 @@ paths:
     get:
       tags: [Admin]
       summary: Daftar semua orders (audit)
+      description: Mengembalikan daftar order audit beserta metadata `pagination`.
       security: [{ bearerAuth: [] }]
       parameters:
         - in: query
@@ -2664,6 +2709,17 @@ paths:
       responses:
         "200":
           description: Daftar orders
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Order"
+                  pagination:
+                    $ref: "#/components/schemas/Pagination"
 
   /api/admin/positions:
     get:
