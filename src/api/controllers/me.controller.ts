@@ -16,6 +16,7 @@ import { eq, desc, sql, and } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { parseBody } from "../../lib/validate";
 import { updateProfileSchema } from "../../lib/schemas";
+import { getPublicUrl } from "../../lib/minio";
 
 export const meController = {
   // GET /api/me — profil + saldo nyawa + referral code
@@ -55,6 +56,7 @@ export const meController = {
     return c.json({
       data: {
         ...user,
+        avatarUrl: getPublicUrl(user.avatarUrl),
         referralStats: {
           totalReferrals: Number(earningsRow?.totalReferrals ?? 0),
           totalUsdtEarned: earningsRow?.totalUsdtEarned ?? "0",
@@ -121,7 +123,15 @@ export const meController = {
         updatedAt: users.updatedAt,
       });
 
-    return c.json({ message: "Profil berhasil diperbarui", data: updated });
+    if (!updated) return c.json({ error: "Gagal memperbarui profil" }, 500);
+
+    return c.json({
+      message: "Profil berhasil diperbarui",
+      data: {
+        ...updated,
+        avatarUrl: getPublicUrl(updated.avatarUrl),
+      },
+    });
   },
 
   // GET /api/me/lives-history — riwayat transaksi nyawa

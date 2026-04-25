@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import { uploadFile } from "../../lib/minio";
+import { uploadFile, getPublicUrl } from "../../lib/minio";
 import { randomBytes } from "crypto";
 import type { TokenPayload } from "../../lib/jwt";
 
@@ -50,8 +50,11 @@ export const uploadController = {
     const uniqueName = `${Date.now()}-${randomBytes(8).toString("hex")}.${ext}`;
     const objectName = `uploads/user-${me.sub}/${uniqueName}`;
 
-    const url = await uploadFile(objectName, buffer, file.type);
+    await uploadFile(objectName, buffer, file.type);
 
-    return c.json({ url }, 201);
+    return c.json({
+      url: objectName, // Path relative untuk disimpan di DB
+      fullUrl: getPublicUrl(objectName), // URL lengkap lewat proxy backend
+    }, 201);
   },
 };

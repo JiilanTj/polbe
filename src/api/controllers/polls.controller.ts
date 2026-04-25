@@ -7,6 +7,7 @@ import { verifyAccessToken } from "../../lib/jwt";
 import { broadcastEvent } from "../../ws/handler";
 import { parseBody, safeInt, escapeHtml } from "../../lib/validate";
 import { pollCreateSchema, pollVoteSchema, pollResolveSchema, pollStatusSchema } from "../../lib/schemas";
+import { getPublicUrl } from "../../lib/minio";
 
 function requestIp(c: Context) {
   return c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? null;
@@ -29,14 +30,14 @@ async function adjustLives(
 
   const balanceAfter = Number(current.livesBalance) + amount;
   await db.update(users).set({ livesBalance: balanceAfter.toString() }).where(eq(users.id, userId));
-  await db.insert(livesTransactions).values({ 
-    userId, 
-    amount: amount.toString(), 
-    type, 
-    refId, 
-    refType, 
-    note, 
-    balanceAfter: balanceAfter.toString() 
+  await db.insert(livesTransactions).values({
+    userId,
+    amount: amount.toString(),
+    type,
+    refId,
+    refType,
+    note,
+    balanceAfter: balanceAfter.toString()
   });
   return balanceAfter;
 }
@@ -72,11 +73,11 @@ export const pollsController = {
       countQuery,
     ]);
     const total = Number(countRows[0]?.total ?? 0);
-    
+
     // Hitung total pool dan distribusi per poll
     const dataWithDist = await Promise.all(rows.map(async (poll) => {
       const votes = await db.select().from(pollVotes).where(eq(pollVotes.pollId, poll.id));
-      
+
       const distribution = poll.options.map((label, index) => {
         const votesForOption = votes.filter(v => v.optionIndex === index);
         return {
@@ -89,7 +90,12 @@ export const pollsController = {
 
       const totalPool = distribution.reduce((sum, d) => sum + d.totalLives, 0);
 
-      return { ...poll, totalPool, distribution };
+      return {
+        ...poll,
+        imageUrl: getPublicUrl(poll.imageUrl),
+        totalPool,
+        distribution,
+      };
     }));
 
     return c.json({
@@ -115,7 +121,7 @@ export const pollsController = {
 
     const dataWithDist = await Promise.all(rows.map(async (poll) => {
       const votes = await db.select().from(pollVotes).where(eq(pollVotes.pollId, poll.id));
-      
+
       const distribution = poll.options.map((label, index) => {
         const votesForOption = votes.filter(v => v.optionIndex === index);
         return {
@@ -128,7 +134,12 @@ export const pollsController = {
 
       const totalPool = distribution.reduce((sum, d) => sum + d.totalLives, 0);
 
-      return { ...poll, totalPool, distribution };
+      return {
+        ...poll,
+        imageUrl: getPublicUrl(poll.imageUrl),
+        totalPool,
+        distribution,
+      };
     }));
 
     return c.json({ data: dataWithDist });
@@ -179,7 +190,7 @@ export const pollsController = {
           .select()
           .from(pollVotes)
           .where(and(eq(pollVotes.pollId, id), eq(pollVotes.userId, viewerId)));
-      } catch {}
+      } catch { }
     }
 
     const stats = {
@@ -221,6 +232,8 @@ export const pollsController = {
       })
       .returning();
 
+    if (!poll) return c.json({ error: "Gagal membuat poll" }, 500);
+
     if (poll) {
       await db.insert(adminAuditLogs).values({
         adminId: Number(me.sub),
@@ -232,7 +245,12 @@ export const pollsController = {
       });
     }
 
-    return c.json({ data: poll }, 201);
+    return c.json({
+      data: {
+        ...poll,
+        imageUrl: getPublicUrl(poll.imageUrl),
+      },
+    }, 201);
   },
 
   // PATCH /api/polls/:id/status — admin ubah status
@@ -301,7 +319,7 @@ export const pollsController = {
       // Debit nyawa
       const balanceAfter = Number(userData.livesBalance) - livesToWager;
       await tx.update(users).set({ livesBalance: balanceAfter.toString() }).where(eq(users.id, Number(me.sub)));
-      
+
       // Simpan transaksi
       const [txRow] = await tx.insert(livesTransactions).values({
         userId: Number(me.sub),
@@ -323,11 +341,11 @@ export const pollsController = {
 
       // Update total votes/volume di tabel polls (denormalisasi)
       await tx.update(polls)
-        .set({ 
+        .set({
           totalVotes: sql`${polls.totalVotes} + 1`,
           totalVolume: (Number(poll.totalVolume || 0) + livesToWager).toString(),
           prizePool: (Number(poll.prizePool || 0) + livesToWager).toString(),
-          updatedAt: new Date() 
+          updatedAt: new Date()
         })
         .where(eq(polls.id, pollId));
     });
@@ -427,7 +445,7 @@ export const pollsController = {
       for (const [userIdStr, amount] of Object.entries(userPayouts)) {
         const userId = Number(userIdStr);
         await adjustLives(userId, amount, "vote_payout", pollId, "poll", `Menang poll #${pollId} - Payout: ${amount} nyawa`);
-        
+
         await db.insert(notifications).values({
           userId,
           type: "payout_credited",

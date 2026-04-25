@@ -6,6 +6,7 @@ import type { TokenPayload } from "../../lib/jwt";
 import { broadcastEvent } from "../../ws/handler";
 import { parseBody, safeInt } from "../../lib/validate";
 import { topupCreateSchema } from "../../lib/schemas";
+import { getPublicUrl } from "../../lib/minio";
 
 
 // Referral fee rate: 0.05 USDT per 1 USDT topup downline
@@ -87,7 +88,10 @@ export const topupController = {
 
     return c.json({
       message: "Request topup berhasil dikirim. Menunggu konfirmasi admin.",
-      data: request,
+      data: {
+        ...request,
+        proofImageUrl: getPublicUrl(request.proofImageUrl),
+      },
     }, 201);
   },
 
@@ -108,11 +112,16 @@ export const topupController = {
 
     // User biasa hanya lihat milik sendiri
     if (!isAdmin) {
-      query = query.where(eq(topupRequests.userId, Number(me.sub))) as typeof query;
+      query = query.where(eq(topupRequests.userId, Number(me.sub))) as any;
     }
 
     const rows = await query;
-    return c.json({ data: rows });
+    const data = rows.map((r) => ({
+      ...r,
+      proofImageUrl: getPublicUrl(r.proofImageUrl),
+    }));
+
+    return c.json({ data });
   },
 
   // PATCH /api/topup/:id/approve — admin approve

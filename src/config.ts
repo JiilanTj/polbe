@@ -21,6 +21,7 @@ export const config = {
   },
   server: {
     port: Number(process.env.PORT) || 3000,
+    publicUrl: process.env.BACKEND_PUBLIC_URL || "http://localhost:3001",
   },
   cors: {
     // Set CORS_ORIGIN di env. Pisahkan koma untuk multi-origin.

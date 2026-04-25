@@ -35,7 +35,7 @@ export const updateProfileSchema = z
       .max(50)
       .regex(/^[a-zA-Z0-9_]+$/, "Username hanya boleh huruf, angka, dan underscore")
       .optional(),
-    avatarUrl: z.string().url("avatarUrl harus URL valid").optional(),
+    avatarUrl: z.string().optional(),
     currentPassword: z.string().optional(),
     newPassword: z.string().min(8, "Password baru minimal 8 karakter").optional(),
   })
@@ -53,7 +53,7 @@ export const pollCreateSchema = z.object({
     .array(z.string().min(1).max(200))
     .min(2, "Minimal 2 opsi")
     .max(10, "Maksimal 10 opsi"),
-  imageUrl: z.string().url().optional(),
+  imageUrl: z.string().optional(),
   startAt: z.string().datetime({ message: "startAt harus ISO datetime" }).optional(),
   endAt: z.string().datetime({ message: "endAt harus ISO datetime" }).optional(),
   livesPerVote: z.number().int().min(1).max(1000).default(1),
@@ -77,7 +77,7 @@ export const pollStatusSchema = z.object({
 // ─── Topup ────────────────────────────────────────────────────
 export const topupCreateSchema = z.object({
   packageId: z.number().int().positive("packageId harus > 0"),
-  proofImageUrl: z.string().url("proofImageUrl harus URL valid"),
+  proofImageUrl: z.string().min(1, "proofImageUrl wajib diisi"),
   walletAddress: z.string().optional(),
 });
 

@@ -12,6 +12,7 @@ import { meRoutes } from "./routes/me.routes";
 import { adminRoutes } from "./routes/admin.routes";
 import { leaderboardRoutes } from "./routes/leaderboard.routes";
 import { uploadRoutes } from "./routes/upload.routes";
+import { filesRoutes } from "./routes/files.routes";
 import { defaultRateLimit } from "./middlewares/rate-limit.middleware";
 import { loggerMiddleware } from "./middlewares/logger.middleware";
 
@@ -35,6 +36,7 @@ export function registerRoutes(app: Hono) {
   api.route("/admin", adminRoutes);
   api.route("/leaderboard", leaderboardRoutes);
   api.route("/upload", uploadRoutes);
+  api.route("/files", filesRoutes);
 
   app.route("/api", api);
 }

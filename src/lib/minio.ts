@@ -46,7 +46,8 @@ export async function uploadFile(
   await minioClient.putObject(BUCKET, objectName, buffer, buffer.length, {
     "Content-Type": contentType,
   });
-  return `${config.minio.publicUrl}/${BUCKET}/${objectName}`;
+  // Mengembalikan URL lewat proxy backend
+  return getPublicUrl(objectName)!;
 }
 
 /**
@@ -54,4 +55,16 @@ export async function uploadFile(
  */
 export async function deleteFile(objectName: string): Promise<void> {
   await minioClient.removeObject(BUCKET, objectName);
+}
+
+/**
+ * Ambil URL publik dinamis lewat proxy backend.
+ */
+export function getPublicUrl(path: string | null | undefined): string | null {
+  if (!path) return null;
+  // Jika sudah full URL (data legacy), return apa adanya
+  if (path.startsWith("http")) return path;
+  
+  // Format: http://backend-domain.com/api/files/path/to/file.jpg
+  return `${config.server.publicUrl}/api/files/${path}`;
 }
