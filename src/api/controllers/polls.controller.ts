@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import { db } from "../../db";
 import { polls, pollVotes, users, livesTransactions, notifications, priceSnapshots } from "../../db/schema";
-import { eq, desc, sql, and, ilike, gt } from "drizzle-orm";
+import { eq, desc, sql, and, ilike, type SQL } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { verifyAccessToken } from "../../lib/jwt";
 import { broadcastEvent } from "../../ws/handler";
@@ -40,25 +40,34 @@ async function adjustLives(
 export const pollsController = {
   // GET /api/polls — daftar poll (publik)
   async list(c: Context) {
-    const page = Number(c.req.query("page") || "1");
-    const limit = Math.min(Number(c.req.query("limit") || "20"), 100);
+    const pageParam = Number(c.req.query("page") || "1");
+    const limitParam = Number(c.req.query("limit") || "20");
+    const page = Number.isFinite(pageParam) ? Math.max(Math.floor(pageParam), 1) : 1;
+    const limit = Number.isFinite(limitParam) ? Math.min(Math.max(Math.floor(limitParam), 1), 100) : 20;
     const status = c.req.query("status");
     const category = c.req.query("category");
     const q = c.req.query("q")?.trim();
     const offset = (page - 1) * limit;
+    const conditions: SQL[] = [];
 
-    let query = db
-      .select()
-      .from(polls)
-      .orderBy(desc(polls.createdAt))
-      .limit(limit)
-      .offset(offset);
+    if (status) conditions.push(eq(polls.status, status as any));
+    if (category) conditions.push(eq(polls.category, category));
+    if (q) conditions.push(ilike(polls.title, `%${q}%`));
 
-    if (status) query = query.where(eq(polls.status, status as any)) as typeof query;
-    if (category) query = query.where(eq(polls.category, category)) as typeof query;
-    if (q) query = query.where(ilike(polls.title, `%${q}%`)) as typeof query;
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    let baseQuery = db.select().from(polls).$dynamic();
+    let countQuery = db.select({ total: sql<number>`count(*)` }).from(polls).$dynamic();
 
-    const rows = await query;
+    if (whereClause) {
+      baseQuery = baseQuery.where(whereClause);
+      countQuery = countQuery.where(whereClause);
+    }
+
+    const [rows, countRows] = await Promise.all([
+      baseQuery.orderBy(desc(polls.createdAt)).limit(limit).offset(offset),
+      countQuery,
+    ]);
+    const total = Number(countRows[0]?.total ?? 0);
     
     // Hitung total pool dan distribusi per poll
     const dataWithDist = await Promise.all(rows.map(async (poll) => {
@@ -79,7 +88,15 @@ export const pollsController = {
       return { ...poll, totalPool, distribution };
     }));
 
-    return c.json({ data: dataWithDist });
+    return c.json({
+      data: dataWithDist,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
   },
 
   // GET /api/polls/trending — poll aktif diurutkan berdasarkan totalVotes DESC
@@ -220,6 +237,11 @@ export const pollsController = {
       .set({ status: status as any, updatedAt: new Date() })
       .where(eq(polls.id, id))
       .returning();
+    if (!updated) return c.json({ error: "Gagal mengubah status poll" }, 500);
+
+    if (status === "active" && poll.status !== "active") {
+      broadcastEvent("poll:activated", { pollId: updated.id, title: updated.title }, "polls");
+    }
 
     return c.json({ data: updated });
   },
@@ -313,7 +335,17 @@ export const pollsController = {
         .where(eq(polls.id, pollId));
     }
 
-    broadcastEvent("poll:vote_cast", { pollId, optionIndex, livesWagered: livesToWager }, "polls");
+    const [updatedPoll] = await db
+      .select({ totalVotes: polls.totalVotes })
+      .from(polls)
+      .where(eq(polls.id, pollId));
+
+    broadcastEvent("poll:vote_cast", {
+      pollId,
+      optionIndex,
+      livesWagered: livesToWager,
+      totalVotes: updatedPoll?.totalVotes ?? Number(poll.totalVotes) + 1,
+    }, "polls");
 
     return c.json({ message: "Berhasil memasang nyawa!" }, 201);
   },
@@ -379,6 +411,8 @@ export const pollsController = {
           refId: pollId,
           refType: "poll",
         });
+
+        broadcastEvent("poll:payout", { pollId, payout: amount }, `user:${userId}`);
       }
     }
 

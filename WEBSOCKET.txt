@@ -33,7 +33,8 @@ Semua pesan dalam format JSON.
   2. SUBSCRIBE — mulai terima event dari channel tertentu
      { "event": "subscribe", "category": "<channel>" }
      Response:
-       { "event": "subscribed", "data": { "category": "<channel>" } }
+       OK    → { "event": "subscribed",       "data": { "category": "<channel>" } }
+       Error → { "event": "subscribe:error",  "data": { "category": "user:42", "error": "Channel user hanya aktif lewat auth token yang valid" } }
 
   3. UNSUBSCRIBE — berhenti terima event dari channel
      { "event": "unsubscribe", "category": "<channel>" }
@@ -49,9 +50,11 @@ Semua pesan dalam format JSON.
 ────────────────────────────────────────────────────────────────────────────────
 
   "all"         — Semua event global (default, otomatis di-subscribe saat connect)
+                  Tidak menerima event personal "user:{id}"
   "polls"       — Event seputar perubahan poll (status, vote)
   "user:{id}"   — Event personal milik user dengan ID tertentu
-                  Hanya aktif setelah kirim event "auth" dengan token yang valid
+                  Otomatis aktif setelah kirim event "auth" dengan token yang valid.
+                  Tidak bisa di-subscribe manual.
 
 
 ────────────────────────────────────────────────────────────────────────────────
@@ -109,7 +112,7 @@ Format selalu: { "event": "<nama>", "data": { ... } }
     Trigger : Poll melewati endAt dan di-close oleh cron job
     { "event": "poll:closed", "data": { "pollId": 7, "title": "..." } }
 
-  ── CLOB Trading (channel: "all") ───────────────────────────────────────────
+  ── CLOB Trading (channel: "polls" atau "all") ─────────────────────────────
 
   poll:trade
     Trigger : Setiap kali ada trade match di CLOB engine
@@ -118,7 +121,7 @@ Format selalu: { "event": "<nama>", "data": { ... } }
       "data": {
         "pollId"       : 7,
         "optionIndex"  : 0,
-        "price"        : "0.6500",
+        "price"        : 0.65,
         "size"         : 10,
         "side"         : "buy"
       }
@@ -145,7 +148,7 @@ Format selalu: { "event": "<nama>", "data": { ... } }
     Trigger : Admin reject request topup
     {
       "event": "topup:rejected",
-      "data": { "topupId": 3, "note": "Bukti tidak valid" }
+      "data": { "userId": 1, "topupId": 3, "note": "Bukti tidak valid" }
     }
 
   withdrawal:approved
@@ -153,6 +156,7 @@ Format selalu: { "event": "<nama>", "data": { ... } }
     {
       "event": "withdrawal:approved",
       "data": {
+        "userId"       : 1,
         "withdrawalId" : 2,
         "usdtAmount"   : "99.00",
         "txHash"       : "0xabc123..."

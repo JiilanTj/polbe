@@ -1369,7 +1369,7 @@ paths:
   /api/polls/{id}:
     get:
       tags: [Polls]
-      summary: Detail poll + distribusi suara + userVote (opsional auth)
+      summary: Detail poll + distribusi suara + userVotes (opsional auth)
       parameters:
         - name: id
           in: path
@@ -1399,12 +1399,24 @@ paths:
                                   type: integer
                                 label:
                                   type: string
-                                votes:
+                                voters:
                                   type: integer
                                 totalLives:
-                                  type: integer
-                          totalVotes:
-                            type: integer
+                                  type: number
+                                percentage:
+                                  type: number
+                          userVotes:
+                            type: array
+                            nullable: true
+                            items:
+                              $ref: "#/components/schemas/PollVote"
+                          stats:
+                            type: object
+                            properties:
+                              totalPool:
+                                type: number
+                              totalParticipants:
+                                type: integer
         "404":
           $ref: "#/components/responses/NotFound"
     delete:
@@ -1450,8 +1462,8 @@ paths:
       tags: [Polls]
       summary: Vote pada poll
       description: |
-        Mendebit `livesPerVote` nyawa dari akun user dan merekam pilihan.
-        **Satu vote per user per poll** (unique constraint di DB).
+        Mendebit nyawa dari akun user dan merekam pilihan.
+        User dapat vote berkali-kali pada poll yang sama.
         Poll harus berstatus `active`.
       security:
         - bearerAuth: []
@@ -1473,6 +1485,10 @@ paths:
                   type: integer
                   description: Index opsi yang dipilih (0-based)
                   example: 0
+                livesWagered:
+                  type: number
+                  description: Jumlah nyawa yang dipertaruhkan. Default 1 jika tidak dikirim.
+                  example: 1
       responses:
         "201":
           description: Vote berhasil
@@ -1483,9 +1499,7 @@ paths:
                 properties:
                   message:
                     type: string
-                    example: "Vote berhasil! Kamu memilih: Bitcoin"
-                  data:
-                    $ref: "#/components/schemas/PollVote"
+                    example: "Berhasil memasang nyawa!"
         "400":
           description: Nyawa tidak cukup atau poll tidak aktif
           content:
@@ -1497,7 +1511,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: User sudah vote di poll ini
+          description: Konflik data vote
           content:
             application/json:
               schema:
@@ -1519,17 +1533,16 @@ paths:
             type: integer
       responses:
         "200":
-          description: Data vote user (null jika belum vote)
+          description: Daftar vote user pada poll ini
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   data:
-                    nullable: true
-                    $ref: "#/components/schemas/PollVote"
-                  voted:
-                    type: boolean
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PollVote"
         "401":
           $ref: "#/components/responses/Unauthorized"
 

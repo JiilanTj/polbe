@@ -7,9 +7,20 @@ interface WsData {
 }
 
 const clients = new Set<ServerWebSocket<WsData>>();
+const PRIVATE_CHANNEL_PREFIX = "user:";
 
 // Interval ping ke semua client setiap 30 detik supaya koneksi idle tidak terputus
 const PING_INTERVAL_MS = 30_000;
+
+function isPrivateCategory(category?: string) {
+  return category?.startsWith(PRIVATE_CHANNEL_PREFIX) ?? false;
+}
+
+function clearUserSubscriptions(subscriptions: Set<string>) {
+  for (const category of subscriptions) {
+    if (isPrivateCategory(category)) subscriptions.delete(category);
+  }
+}
 
 export const wsHandler = {
   open(ws: ServerWebSocket<WsData>) {
@@ -34,6 +45,17 @@ export const wsHandler = {
       const msg = JSON.parse(typeof message === "string" ? message : message.toString());
 
       if (msg.event === "subscribe" && typeof msg.category === "string") {
+        if (isPrivateCategory(msg.category)) {
+          ws.send(JSON.stringify({
+            event: "subscribe:error",
+            data: {
+              category: msg.category,
+              error: "Channel user hanya aktif lewat auth token yang valid",
+            },
+          }));
+          return;
+        }
+
         ws.data.subscriptions.add(msg.category);
         ws.send(JSON.stringify({ event: "subscribed", data: { category: msg.category } }));
       }
@@ -49,6 +71,7 @@ export const wsHandler = {
         try {
           const payload = await verifyAccessToken(msg.token);
           const userId = Number(payload.sub);
+          clearUserSubscriptions(ws.data.subscriptions);
           ws.data.subscriptions.add(`user:${userId}`);
           ws.send(JSON.stringify({ event: "auth:ok", data: { userId } }));
         } catch {
@@ -74,9 +97,15 @@ export const wsHandler = {
 
 export function broadcastEvent(event: string, data: unknown, category?: string) {
   const payload = JSON.stringify({ event, data });
+  const privateEvent = isPrivateCategory(category);
 
   for (const client of clients) {
     const subs = client.data?.subscriptions;
+    if (privateEvent) {
+      if (category && subs?.has(category)) client.send(payload);
+      continue;
+    }
+
     if (subs?.has("all") || (category && subs?.has(category))) {
       client.send(payload);
     }
