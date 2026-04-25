@@ -4,19 +4,26 @@ import { verifyAccessToken } from "../lib/jwt";
 interface WsData {
   subscriptions: Set<string>;
   pingInterval?: ReturnType<typeof setInterval>;
+  userId?: number;
+  role?: string;
 }
 
 const clients = new Set<ServerWebSocket<WsData>>();
 const PRIVATE_CHANNEL_PREFIX = "user:";
+const ADMIN_CHANNEL = "admin";
 
 // Interval ping ke semua client setiap 30 detik supaya koneksi idle tidak terputus
 const PING_INTERVAL_MS = 30_000;
 
 function isPrivateCategory(category?: string) {
-  return category?.startsWith(PRIVATE_CHANNEL_PREFIX) ?? false;
+  return category?.startsWith(PRIVATE_CHANNEL_PREFIX) || category === ADMIN_CHANNEL || false;
 }
 
-function clearUserSubscriptions(subscriptions: Set<string>) {
+function isAdminRole(role?: string) {
+  return role === "admin" || role === "platform";
+}
+
+function clearPrivateSubscriptions(subscriptions: Set<string>) {
   for (const category of subscriptions) {
     if (isPrivateCategory(category)) subscriptions.delete(category);
   }
@@ -45,12 +52,23 @@ export const wsHandler = {
       const msg = JSON.parse(typeof message === "string" ? message : message.toString());
 
       if (msg.event === "subscribe" && typeof msg.category === "string") {
-        if (isPrivateCategory(msg.category)) {
+        if (msg.category.startsWith(PRIVATE_CHANNEL_PREFIX)) {
           ws.send(JSON.stringify({
             event: "subscribe:error",
             data: {
               category: msg.category,
               error: "Channel user hanya aktif lewat auth token yang valid",
+            },
+          }));
+          return;
+        }
+
+        if (msg.category === ADMIN_CHANNEL && !isAdminRole(ws.data.role)) {
+          ws.send(JSON.stringify({
+            event: "subscribe:error",
+            data: {
+              category: msg.category,
+              error: "Channel admin hanya aktif untuk token admin/platform yang valid",
             },
           }));
           return;
@@ -71,10 +89,18 @@ export const wsHandler = {
         try {
           const payload = await verifyAccessToken(msg.token);
           const userId = Number(payload.sub);
-          clearUserSubscriptions(ws.data.subscriptions);
+          ws.data.userId = userId;
+          ws.data.role = payload.role;
+          clearPrivateSubscriptions(ws.data.subscriptions);
           ws.data.subscriptions.add(`user:${userId}`);
-          ws.send(JSON.stringify({ event: "auth:ok", data: { userId } }));
+          if (isAdminRole(payload.role)) {
+            ws.data.subscriptions.add(ADMIN_CHANNEL);
+          }
+          ws.send(JSON.stringify({ event: "auth:ok", data: { userId, role: payload.role } }));
         } catch {
+          ws.data.userId = undefined;
+          ws.data.role = undefined;
+          clearPrivateSubscriptions(ws.data.subscriptions);
           ws.send(JSON.stringify({ event: "auth:error", data: { error: "Token tidak valid atau kadaluarsa" } }));
         }
       }

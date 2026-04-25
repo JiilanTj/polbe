@@ -27,7 +27,7 @@ Semua pesan dalam format JSON.
   1. AUTH — daftarkan koneksi sebagai milik user tertentu
      { "event": "auth", "token": "<access_token>" }
      Response:
-       OK    → { "event": "auth:ok",    "data": { "userId": 42 } }
+       OK    → { "event": "auth:ok",    "data": { "userId": 42, "role": "user" } }
        Error → { "event": "auth:error", "data": { "error": "Token tidak valid atau kadaluarsa" } }
 
   2. SUBSCRIBE — mulai terima event dari channel tertentu
@@ -35,6 +35,7 @@ Semua pesan dalam format JSON.
      Response:
        OK    → { "event": "subscribed",       "data": { "category": "<channel>" } }
        Error → { "event": "subscribe:error",  "data": { "category": "user:42", "error": "Channel user hanya aktif lewat auth token yang valid" } }
+       Error → { "event": "subscribe:error",  "data": { "category": "admin", "error": "Channel admin hanya aktif untuk token admin/platform yang valid" } }
 
   3. UNSUBSCRIBE — berhenti terima event dari channel
      { "event": "unsubscribe", "category": "<channel>" }
@@ -50,8 +51,10 @@ Semua pesan dalam format JSON.
 ────────────────────────────────────────────────────────────────────────────────
 
   "all"         — Semua event global (default, otomatis di-subscribe saat connect)
-                  Tidak menerima event personal "user:{id}"
+                  Tidak menerima event private "user:{id}" atau "admin"
   "polls"       — Event seputar perubahan poll (status, vote)
+  "admin"       — Event operasional admin (finance, audit refresh)
+                  Otomatis aktif setelah auth memakai token role admin/platform.
   "user:{id}"   — Event personal milik user dengan ID tertentu
                   Otomatis aktif setelah kirim event "auth" dengan token yang valid.
                   Tidak bisa di-subscribe manual.
@@ -170,6 +173,25 @@ Format selalu: { "event": "<nama>", "data": { ... } }
       "data": { "userId": 1, "withdrawalId": 2, "usdtRefunded": "99.00", "note": "Alamat wallet tidak valid" }
     }
 
+  ── Admin Private (channel: "admin") ─────────────────────────────────────────
+  Hanya dikirim ke koneksi admin/platform yang sudah auth.
+
+  topup:created
+    Trigger : User membuat request topup baru
+    { "event": "topup:created", "data": { "userId": 1, "topupId": 3, "livesAmount": 15, "usdtAmount": "10" } }
+
+  topup:approved / topup:rejected
+    Trigger : Admin memproses request topup
+    Payload sama dengan event personal, ditambah "topupId" untuk approved.
+
+  withdrawal:created
+    Trigger : User membuat request withdrawal baru
+    { "event": "withdrawal:created", "data": { "userId": 1, "withdrawalId": 2, "usdtAmount": "100.00", "netAmount": "99.00" } }
+
+  withdrawal:approved / withdrawal:rejected
+    Trigger : Admin memproses request withdrawal
+    Payload sama dengan event personal.
+
 
 ────────────────────────────────────────────────────────────────────────────────
   CONTOH FLOW (JavaScript)
@@ -212,5 +234,6 @@ ws.onmessage = (e) => {
 - Token yang dipakai untuk auth WS adalah access token yang sama dengan REST API
 - Jika token expired, kirim ulang event "auth" dengan token baru (setelah refresh)
 - Channel "user:{id}" otomatis aktif setelah auth berhasil, tidak perlu subscribe manual
+- Channel "admin" otomatis aktif untuk role admin/platform setelah auth berhasil
 
 ================================================================================

@@ -85,6 +85,14 @@ export const topupController = {
         status: "pending",
       })
       .returning();
+    if (!request) return c.json({ error: "Gagal membuat request topup" }, 500);
+
+    broadcastEvent("topup:created", {
+      userId: request.userId,
+      topupId: request.id,
+      livesAmount: request.livesAmount,
+      usdtAmount: request.usdtAmount,
+    }, "admin");
 
     return c.json({
       message: "Request topup berhasil dikirim. Menunggu konfirmasi admin.",
@@ -198,6 +206,12 @@ export const topupController = {
     broadcastEvent("topup:approved", {
       userId: req.userId, livesAmount: req.livesAmount, newBalance,
     }, `user:${req.userId}`);
+    broadcastEvent("topup:approved", {
+      userId: req.userId,
+      topupId: req.id,
+      livesAmount: req.livesAmount,
+      newBalance,
+    }, "admin");
 
     return c.json({
       message: `Topup disetujui. User #${req.userId} mendapat ${req.livesAmount} nyawa (saldo baru: ${newBalance})`,
@@ -232,6 +246,11 @@ export const topupController = {
       topupId: id,
       note: body.adminNote ?? null,
     }, `user:${req.userId}`);
+    broadcastEvent("topup:rejected", {
+      userId: req.userId,
+      topupId: id,
+      note: body.adminNote ?? null,
+    }, "admin");
 
     return c.json({ message: `Topup #${id} ditolak` });
   },

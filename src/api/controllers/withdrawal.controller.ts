@@ -80,6 +80,14 @@ export const withdrawalController = {
         status: "pending",
       })
       .returning();
+    if (!request) return c.json({ error: "Gagal membuat request withdrawal" }, 500);
+
+    broadcastEvent("withdrawal:created", {
+      userId: request.userId,
+      withdrawalId: request.id,
+      usdtAmount: request.usdtAmount,
+      netAmount: request.netAmount,
+    }, "admin");
 
     return c.json({
       message: "Request withdrawal berhasil dikirim. Menunggu konfirmasi admin.",
@@ -149,6 +157,12 @@ export const withdrawalController = {
       usdtAmount: req.usdtAmount,
       txHash: body.txHash ?? null,
     }, `user:${req.userId}`);
+    broadcastEvent("withdrawal:approved", {
+      userId: req.userId,
+      withdrawalId: id,
+      usdtAmount: req.usdtAmount,
+      txHash: body.txHash ?? null,
+    }, "admin");
 
     return c.json({
       message: `Withdrawal #${id} disetujui${body.txHash ? ` (TxHash: ${body.txHash})` : ""}`,
@@ -191,6 +205,12 @@ export const withdrawalController = {
       usdtRefunded: req.usdtAmount,
       note: body.adminNote ?? null,
     }, `user:${req.userId}`);
+    broadcastEvent("withdrawal:rejected", {
+      userId: req.userId,
+      withdrawalId: id,
+      usdtRefunded: req.usdtAmount,
+      note: body.adminNote ?? null,
+    }, "admin");
 
     return c.json({ message: `Withdrawal #${id} ditolak. Saldo ${req.usdtAmount} USDT dikembalikan.` });
   },
