@@ -19,6 +19,11 @@ export const config = {
     apiKey: process.env.OPENAI_API_KEY || "",
     model: process.env.OPENAI_MODEL || "gpt-4o",
   },
+  email: {
+    resendApiKey: process.env.RESEND_API_KEY || "",
+    from: process.env.RESEND_FROM_EMAIL || "Porygon <no-reply@porygon.dev>",
+    appPublicUrl: process.env.APP_PUBLIC_URL || "http://localhost:3000",
+  },
   server: {
     port: Number(process.env.PORT) || 3000,
     publicUrl: process.env.BACKEND_PUBLIC_URL || "http://localhost:3001",

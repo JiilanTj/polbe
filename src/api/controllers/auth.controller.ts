@@ -6,6 +6,7 @@ import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../../lib
 import { redis } from "../../lib/redis";
 import { parseBody } from "../../lib/validate";
 import { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } from "../../lib/schemas";
+import { buildResetPasswordUrl, sendPasswordResetEmail } from "../../lib/email";
 
 // Refresh token TTL in seconds (7 days)
 const REFRESH_TTL = 60 * 60 * 24 * 7;
@@ -262,7 +263,7 @@ export const authController = {
     const { email } = body;
 
     const [user] = await db
-      .select({ id: users.id, email: users.email })
+      .select({ id: users.id, email: users.email, username: users.username })
       .from(users)
       .where(eq(users.email, email.toLowerCase()));
 
@@ -274,8 +275,20 @@ export const authController = {
     const resetToken = crypto.randomUUID();
     await redis.set(resetTokenKey(resetToken), String(user.id), "EX", RESET_TTL);
 
-    // Log ke console — integrasikan dengan email service (Resend, Mailgun, SMTP, dll)
-    console.log(`[ForgotPassword] User #${user.id} (${email}): token=${resetToken} (berlaku 1 jam)`);
+    const emailResult = await sendPasswordResetEmail({
+      to: user.email,
+      username: user.username,
+      token: resetToken,
+    });
+
+    if (emailResult.sent) {
+      console.log(`[ForgotPassword] Reset email sent to ${email} (user #${user.id})`);
+    } else {
+      console.warn(
+        `[ForgotPassword] Email not sent for ${email} (user #${user.id}): ${emailResult.reason ?? emailResult.error ?? "unknown reason"}`,
+      );
+      console.log(`[ForgotPassword] Reset URL: ${emailResult.resetUrl ?? buildResetPasswordUrl(resetToken)}`);
+    }
 
     return c.json({ message: "Jika email terdaftar, instruksi reset password akan dikirim" });
   },
