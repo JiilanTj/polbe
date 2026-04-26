@@ -69,7 +69,9 @@ export const adminController = {
     if (search) {
       conditions.push(or(ilike(users.email, `%${search}%`), ilike(users.username, `%${search}%`)));
     }
-    if (role) {
+    if (role === 'contributor') {
+      conditions.push(sql`${users.contributorUntil} > now()`);
+    } else if (role) {
       conditions.push(eq(users.role, role as any));
     }
 

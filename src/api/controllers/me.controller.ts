@@ -37,6 +37,7 @@ export const meController = {
         livesRecoveryAt: users.livesRecoveryAt,
         referralCode: users.referralCode,
         referredBy: users.referredBy,
+        contributorUntil: users.contributorUntil,
         createdAt: users.createdAt,
       })
       .from(users)
@@ -552,5 +553,70 @@ export const meController = {
       .where(eq(notifications.id, id));
 
     return c.json({ message: "Notifikasi ditandai sudah dibaca" });
+  },
+
+  // POST /api/me/subscribe-contributor — beli level contributor (10 lives/30 hari)
+  async subscribeContributor(c: Context) {
+    const me = c.get("user") as TokenPayload;
+    const userId = Number(me.sub);
+
+    const result = await db.transaction(async (tx) => {
+      const [user] = await tx
+        .select({
+          livesBalance: users.livesBalance,
+          contributorUntil: users.contributorUntil,
+        })
+        .from(users)
+        .where(eq(users.id, userId));
+
+      if (!user) throw new Error("User tidak ditemukan");
+
+      const COST = 10;
+      if (Number(user.livesBalance) < COST) {
+        throw new Error("Nyawa tidak cukup (butuh 10 nyawa)");
+      }
+
+      // Hitung tanggal baru
+      const now = new Date();
+      let newUntil = new Date();
+      if (user.contributorUntil && user.contributorUntil > now) {
+        // Jika masih aktif, tambahkan dari tanggal expired
+        newUntil = new Date(user.contributorUntil.getTime() + 30 * 24 * 60 * 60 * 1000);
+      } else {
+        // Jika sudah mati, mulai dari sekarang
+        newUntil = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+      }
+
+      const balanceAfter = Number(user.livesBalance) - COST;
+
+      // Update user
+      await tx
+        .update(users)
+        .set({
+          livesBalance: balanceAfter.toString(),
+          contributorUntil: newUntil,
+        })
+        .where(eq(users.id, userId));
+
+      // Catat transaksi
+      await tx.insert(livesTransactions).values({
+        userId,
+        amount: (-COST).toString(),
+        type: "contributor_purchase",
+        note: `Upgrade/Extend level Contributor (30 hari)`,
+        balanceAfter: balanceAfter.toString(),
+      });
+
+      return { balanceAfter, contributorUntil: newUntil };
+    }).catch(err => ({ error: err.message }));
+
+    if ("error" in result) {
+      return c.json({ error: result.error }, 400);
+    }
+
+    return c.json({
+      message: "Berhasil upgrade menjadi Contributor!",
+      data: result,
+    });
   },
 };

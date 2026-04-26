@@ -6,7 +6,7 @@ export const withdrawalStatusEnum = pgEnum("withdrawal_status", ["pending", "app
 export const pollStatusEnum = pgEnum("poll_status", ["draft", "active", "resolved", "closed"]);
 export const livesTransactionTypeEnum = pgEnum("lives_transaction_type", [
   "purchase", "vote_debit", "vote_payout", "recovery", "referral_bonus", "admin_credit", "admin_debit",
-  "withdrawal_debit", "withdrawal_refund",
+  "withdrawal_debit", "withdrawal_refund", "contributor_purchase",
 ]);
 
 export const users = pgTable("users", {
@@ -23,6 +23,7 @@ export const users = pgTable("users", {
   // ─── Lives ────────────────────────────────────────────
   livesBalance: decimal("lives_balance", { precision: 18, scale: 6 }).default("0").notNull(),
   livesRecoveryAt: timestamp("lives_recovery_at").defaultNow().notNull(),
+  contributorUntil: timestamp("contributor_until"),
   // ─── Referral ─────────────────────────────────────────
   referralCode: varchar("referral_code", { length: 20 }).unique(),
   referredBy: integer("referred_by").references((): AnyPgColumn => users.id),

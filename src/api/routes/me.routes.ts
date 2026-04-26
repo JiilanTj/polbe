@@ -10,6 +10,7 @@ meRoutes.get("/", meController.profile);
 meRoutes.patch("/", meController.updateProfile);
 meRoutes.get("/lives-history", meController.livesHistory);
 meRoutes.get("/referrals", meController.referrals);
+meRoutes.post("/subscribe-contributor", meController.subscribeContributor);
 meRoutes.get("/polls", meController.myPolls);
 meRoutes.get("/portfolio", meController.portfolio);
 meRoutes.get("/orders", meController.myOrders);

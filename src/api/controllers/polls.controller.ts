@@ -213,6 +213,23 @@ export const pollsController = {
       sourceArticleIds, aiGenerated,
     } = body;
 
+    // ─── Contributor Check ───────────────────────────────────────
+    const isAdmin = me.role === "admin" || me.role === "platform";
+    if (!isAdmin) {
+      const [user] = await db
+        .select({ contributorUntil: users.contributorUntil })
+        .from(users)
+        .where(eq(users.id, Number(me.sub)));
+
+      const isContributor = user?.contributorUntil && user.contributorUntil > new Date();
+      if (!isContributor) {
+        return c.json({
+          error: "Hanya Contributor yang bisa membuat poll. Silakan upgrade di profil (Biaya 10 Lives/bulan).",
+          code: "NOT_A_CONTRIBUTOR"
+        }, 403);
+      }
+    }
+
     const [poll] = await db
       .insert(polls)
       .values({
@@ -239,7 +256,7 @@ export const pollsController = {
 
     if (!poll) return c.json({ error: "Gagal membuat poll" }, 500);
 
-    if (poll) {
+    if (poll && isAdmin) {
       await db.insert(adminAuditLogs).values({
         adminId: Number(me.sub),
         action: "create_poll",
