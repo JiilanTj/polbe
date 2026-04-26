@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { db } from "../../db";
-import { adminAuditLogs, topupRequests, lifePackages, users, livesTransactions, referralEarnings, notifications } from "../../db/schema";
+import { adminAuditLogs, topupRequests, lifePackages, users, livesTransactions, referralEarnings, notifications, platformSettings } from "../../db/schema";
 import { eq, desc, sql, and, gte } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { broadcastEvent } from "../../ws/handler";
@@ -11,6 +11,34 @@ import { getPublicUrl } from "../../lib/minio";
 
 // Referral fee rate: 0.05 USDT per 1 USDT topup downline
 const REFERRAL_FEE_RATE = 0.05;
+
+type TopupPaymentMethod = {
+  network: string;
+  label: string;
+  address: string;
+  isActive: boolean;
+};
+
+function normalizeTopupPaymentMethods(input: unknown): TopupPaymentMethod[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((raw) => {
+      if (!raw || typeof raw !== "object") return null;
+      const item = raw as Record<string, unknown>;
+      const network = String(item.network ?? "").trim().toUpperCase();
+      const label = String(item.label ?? network).trim() || network;
+      const address = String(item.address ?? "").trim();
+      const isActive = item.isActive !== false;
+      if (!network || !address) return null;
+      return { network, label, address, isActive };
+    })
+    .filter((item): item is TopupPaymentMethod => item !== null);
+}
+
+async function getActivePaymentMethods() {
+  const [settings] = await db.select({ topupPaymentMethods: platformSettings.topupPaymentMethods }).from(platformSettings).limit(1);
+  return normalizeTopupPaymentMethods(settings?.topupPaymentMethods).filter((method) => method.isActive);
+}
 
 function requestIp(c: Context) {
   return c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? null;
@@ -48,13 +76,19 @@ async function creditLivesTx(
 }
 
 export const topupController = {
+  // GET /api/topup/payment-methods — user lihat alamat tujuan USDT yang diset admin
+  async paymentMethods(c: Context) {
+    const methods = await getActivePaymentMethods();
+    return c.json({ data: methods });
+  },
+
   // POST /api/topup — user buat request topup
   async create(c: Context) {
     const me = c.get("user") as TokenPayload;
     const body = await parseBody(c, topupCreateSchema);
     if (body instanceof Response) return body;
 
-    const { packageId, proofImageUrl, walletAddress } = body;
+    const { packageId, proofImageUrl, paymentNetwork } = body;
 
     // Ambil paket
     const [pkg] = await db
@@ -65,6 +99,16 @@ export const topupController = {
     if (!pkg) return c.json({ error: "Paket tidak ditemukan" }, 404);
     if (!pkg.isActive) return c.json({ error: "Paket sedang tidak aktif" }, 400);
 
+    const methods = await getActivePaymentMethods();
+    if (methods.length === 0) {
+      return c.json({ error: "Alamat topup USDT belum dikonfigurasi admin" }, 503);
+    }
+
+    const selectedMethod = methods.find((method) => method.network === paymentNetwork?.trim().toUpperCase());
+    if (!selectedMethod) {
+      return c.json({ error: "Network topup tidak valid atau sedang nonaktif" }, 422);
+    }
+
     const [request] = await db
       .insert(topupRequests)
       .values({
@@ -73,7 +117,9 @@ export const topupController = {
         usdtAmount: pkg.usdtPrice,
         livesAmount: pkg.livesAmount,
         proofImageUrl,
-        walletAddress: walletAddress ?? null,
+        walletAddress: selectedMethod.address,
+        paymentNetwork: selectedMethod.network,
+        paymentAddress: selectedMethod.address,
         status: "pending",
       })
       .returning();
@@ -84,6 +130,7 @@ export const topupController = {
       topupId: request.id,
       livesAmount: request.livesAmount,
       usdtAmount: request.usdtAmount,
+      paymentNetwork: request.paymentNetwork,
     }, "admin");
 
     return c.json({

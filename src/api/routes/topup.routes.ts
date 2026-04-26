@@ -5,6 +5,8 @@ import { adminMutationRateLimit } from "../middlewares/rate-limit.middleware";
 
 export const topupRoutes = new Hono();
 
+topupRoutes.get("/payment-methods", authMiddleware, topupController.paymentMethods);
+
 // User: buat request & lihat history
 topupRoutes.post("/", authMiddleware, topupController.create);
 topupRoutes.get("/", authMiddleware, topupController.list);

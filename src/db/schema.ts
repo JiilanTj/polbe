@@ -117,7 +117,9 @@ export const topupRequests = pgTable("topup_requests", {
   usdtAmount: decimal("usdt_amount", { precision: 10, scale: 2 }).notNull(),
   livesAmount: integer("lives_amount").notNull(),
   proofImageUrl: text("proof_image_url"),         // URL gambar bukti transfer
-  walletAddress: varchar("wallet_address", { length: 100 }), // alamat USDT platform
+  walletAddress: varchar("wallet_address", { length: 100 }), // legacy: alamat USDT platform
+  paymentNetwork: varchar("payment_network", { length: 50 }), // TRC-20 / ERC-20 / BEP-20 / dll
+  paymentAddress: text("payment_address"),                    // snapshot alamat tujuan saat request dibuat
   status: topupStatusEnum("status").default("pending").notNull(),
   adminNote: text("admin_note"),
   approvedBy: integer("approved_by").references(() => users.id),
@@ -355,6 +357,7 @@ export const notifications = pgTable("notifications", {
 export const platformSettings = pgTable("platform_settings", {
   id: serial("id").primaryKey(),
   withdrawalFeePercent: decimal("withdrawal_fee_percent", { precision: 5, scale: 2 }).default("1").notNull(), // default 1%
+  topupPaymentMethods: jsonb("topup_payment_methods"),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
   updatedBy: integer("updated_by").references(() => users.id),
 });

@@ -6,6 +6,35 @@ import type { TokenPayload } from "../../lib/jwt";
 import { parseBody, safeInt } from "../../lib/validate";
 import { adminCreditSchema, adminRoleSchema } from "../../lib/schemas";
 
+type TopupPaymentMethod = {
+  network: string;
+  label: string;
+  address: string;
+  isActive: boolean;
+};
+
+function normalizeTopupPaymentMethods(input: unknown): TopupPaymentMethod[] {
+  if (!Array.isArray(input)) return [];
+
+  const seen = new Set<string>();
+  const methods: TopupPaymentMethod[] = [];
+
+  for (const raw of input) {
+    if (!raw || typeof raw !== "object") continue;
+    const item = raw as Record<string, unknown>;
+    const network = String(item.network ?? "").trim().toUpperCase();
+    const address = String(item.address ?? "").trim();
+    const label = String(item.label ?? network).trim() || network;
+    const isActive = item.isActive !== false;
+
+    if (!network || !address || seen.has(network)) continue;
+    seen.add(network);
+    methods.push({ network, label, address, isActive });
+  }
+
+  return methods;
+}
+
 export const adminController = {
   // GET /api/admin/stats — ringkasan dashboard admin
   async stats(c: Context) {
@@ -371,6 +400,7 @@ export const adminController = {
     return c.json({
       data: {
         withdrawalFeePercent: Number(settings?.withdrawalFeePercent ?? 1),
+        topupPaymentMethods: normalizeTopupPaymentMethods(settings?.topupPaymentMethods),
       },
     });
   },
@@ -406,6 +436,52 @@ export const adminController = {
       ipAddress: c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? null,
     });
 
-    return c.json({ message: `Withdrawal fee diubah ke ${fee}%`, data: { withdrawalFeePercent: fee } });
+    const [settings] = await db.select().from(platformSettings).limit(1);
+    return c.json({
+      message: `Withdrawal fee diubah ke ${fee}%`,
+      data: {
+        withdrawalFeePercent: fee,
+        topupPaymentMethods: normalizeTopupPaymentMethods(settings?.topupPaymentMethods),
+      },
+    });
+  },
+
+  // PATCH /api/admin/settings/topup-payment-methods — ubah alamat tujuan topup USDT
+  async updateTopupPaymentMethods(c: Context) {
+    const me = c.get("user") as TokenPayload;
+    const body = await c.req.json().catch(() => ({})) as { methods?: unknown };
+    const methods = normalizeTopupPaymentMethods(body.methods);
+
+    if (methods.length === 0) {
+      return c.json({ error: "Minimal satu network aktif/alamat USDT wajib diisi" }, 422);
+    }
+
+    const existing = await db.select({ id: platformSettings.id }).from(platformSettings).limit(1);
+    if (existing.length > 0 && existing[0]) {
+      await db
+        .update(platformSettings)
+        .set({ topupPaymentMethods: methods, updatedAt: new Date(), updatedBy: Number(me.sub) })
+        .where(eq(platformSettings.id, existing[0].id));
+    } else {
+      await db
+        .insert(platformSettings)
+        .values({ topupPaymentMethods: methods, updatedBy: Number(me.sub) });
+    }
+
+    await db.insert(adminAuditLogs).values({
+      adminId: Number(me.sub),
+      action: "update_topup_payment_methods",
+      metadata: { networks: methods.map((method) => method.network) },
+      ipAddress: c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? null,
+    });
+
+    const [settings] = await db.select().from(platformSettings).limit(1);
+    return c.json({
+      message: "Payment method topup berhasil disimpan",
+      data: {
+        withdrawalFeePercent: Number(settings?.withdrawalFeePercent ?? 1),
+        topupPaymentMethods: methods,
+      },
+    });
   },
 };

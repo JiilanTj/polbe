@@ -78,6 +78,7 @@ export const pollStatusSchema = z.object({
 export const topupCreateSchema = z.object({
   packageId: z.number().int().positive("packageId harus > 0"),
   proofImageUrl: z.string().min(1, "proofImageUrl wajib diisi"),
+  paymentNetwork: z.string().min(1, "paymentNetwork wajib diisi").max(50).optional(),
   walletAddress: z.string().optional(),
 });
 
