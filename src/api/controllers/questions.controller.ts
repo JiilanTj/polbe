@@ -252,6 +252,9 @@ export const questionsController = {
     const id = Number(c.req.param("id"));
     if (!id || isNaN(id)) return c.json({ error: "ID tidak valid" }, 400);
 
+    const body = await c.req.json().catch(() => ({}));
+    const { endAt: endAtOverride } = body as { endAt?: string };
+
     const [question] = await db.select().from(generatedQuestions).where(eq(generatedQuestions.id, id));
     if (!question) return c.json({ error: "Question tidak ditemukan" }, 404);
 
@@ -329,7 +332,7 @@ export const questionsController = {
           aiGenerated: true,
           sourceArticleIds: Array.isArray(question.sourceArticleIds) ? question.sourceArticleIds : null,
           startAt: question.startDate ?? new Date(),
-          endAt: question.resolutionDate ?? null,
+          endAt: endAtOverride ? new Date(endAtOverride) : (question.resolutionDate ?? null),
           livesPerVote: 1,
           platformFeePercent: "30",
         })
