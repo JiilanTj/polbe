@@ -28,8 +28,9 @@ pollsRoutes.get("/:id/comments", commentsController.list);
 pollsRoutes.post("/:id/comments", authMiddleware, commentsController.create);
 pollsRoutes.delete("/:id/comments/:commentId", authMiddleware, commentsController.deleteComment);
 
-// Admin/platform — kelola poll
-pollsRoutes.post("/", authMiddleware, requireRole("admin", "platform"), adminMutationRateLimit, pollsController.create);
-pollsRoutes.patch("/:id/status", authMiddleware, requireRole("admin"), adminMutationRateLimit, pollsController.updateStatus);
-pollsRoutes.patch("/:id/resolve", authMiddleware, requireRole("admin"), adminMutationRateLimit, pollsController.resolve);
-pollsRoutes.delete("/:id", authMiddleware, requireRole("admin"), adminMutationRateLimit, pollsController.deletePoll);
+// Admin/platform/contributor — kelola poll
+// User role diizinkan karena controller akan mengecek isContributor atau isCreator
+pollsRoutes.post("/", authMiddleware, requireRole("admin", "platform", "user"), adminMutationRateLimit, pollsController.create);
+pollsRoutes.patch("/:id/status", authMiddleware, requireRole("admin", "user"), adminMutationRateLimit, pollsController.updateStatus);
+pollsRoutes.patch("/:id/resolve", authMiddleware, requireRole("admin", "user"), adminMutationRateLimit, pollsController.resolve);
+pollsRoutes.delete("/:id", authMiddleware, requireRole("admin", "user"), adminMutationRateLimit, pollsController.deletePoll);
