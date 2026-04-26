@@ -400,6 +400,7 @@ export const adminController = {
     return c.json({
       data: {
         withdrawalFeePercent: Number(settings?.withdrawalFeePercent ?? 1),
+        livesToUsdtRate: Number(settings?.livesToUsdtRate ?? 1),
         topupPaymentMethods: normalizeTopupPaymentMethods(settings?.topupPaymentMethods),
       },
     });
@@ -441,6 +442,47 @@ export const adminController = {
       message: `Withdrawal fee diubah ke ${fee}%`,
       data: {
         withdrawalFeePercent: fee,
+        livesToUsdtRate: Number(settings?.livesToUsdtRate ?? 1),
+        topupPaymentMethods: normalizeTopupPaymentMethods(settings?.topupPaymentMethods),
+      },
+    });
+  },
+
+  // PATCH /api/admin/settings/lives-to-usdt-rate — ubah rate konversi WD Lives → USDT
+  async updateLivesToUsdtRate(c: Context) {
+    const me = c.get("user") as TokenPayload;
+    const body = await c.req.json().catch(() => ({})) as { rate?: number };
+
+    const rate = Number(body.rate);
+    if (isNaN(rate) || rate <= 0 || rate > 1000000) {
+      return c.json({ error: "rate harus angka > 0" }, 422);
+    }
+
+    const existing = await db.select({ id: platformSettings.id }).from(platformSettings).limit(1);
+    if (existing.length > 0 && existing[0]) {
+      await db
+        .update(platformSettings)
+        .set({ livesToUsdtRate: rate.toFixed(4), updatedAt: new Date(), updatedBy: Number(me.sub) })
+        .where(eq(platformSettings.id, existing[0].id));
+    } else {
+      await db
+        .insert(platformSettings)
+        .values({ livesToUsdtRate: rate.toFixed(4), updatedBy: Number(me.sub) });
+    }
+
+    await db.insert(adminAuditLogs).values({
+      adminId: Number(me.sub),
+      action: "update_lives_to_usdt_rate",
+      metadata: { livesToUsdtRate: rate },
+      ipAddress: c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? null,
+    });
+
+    const [settings] = await db.select().from(platformSettings).limit(1);
+    return c.json({
+      message: `Rate Lives to USDT diubah ke ${rate}`,
+      data: {
+        withdrawalFeePercent: Number(settings?.withdrawalFeePercent ?? 1),
+        livesToUsdtRate: Number(settings?.livesToUsdtRate ?? rate),
         topupPaymentMethods: normalizeTopupPaymentMethods(settings?.topupPaymentMethods),
       },
     });
@@ -480,6 +522,7 @@ export const adminController = {
       message: "Payment method topup berhasil disimpan",
       data: {
         withdrawalFeePercent: Number(settings?.withdrawalFeePercent ?? 1),
+        livesToUsdtRate: Number(settings?.livesToUsdtRate ?? 1),
         topupPaymentMethods: methods,
       },
     });

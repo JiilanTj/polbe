@@ -23,4 +23,5 @@ adminRoutes.get("/audit-logs", adminController.listAuditLogs);
 // ─── Platform Settings ───────────────────────────────────────────────────────
 adminRoutes.get("/settings", adminController.getSettings);
 adminRoutes.patch("/settings/withdrawal-fee", adminMutationRateLimit, adminController.updateWithdrawalFee);
+adminRoutes.patch("/settings/lives-to-usdt-rate", adminMutationRateLimit, adminController.updateLivesToUsdtRate);
 adminRoutes.patch("/settings/topup-payment-methods", adminMutationRateLimit, adminController.updateTopupPaymentMethods);

@@ -5,6 +5,8 @@ import { adminMutationRateLimit } from "../middlewares/rate-limit.middleware";
 
 export const withdrawalRoutes = new Hono();
 
+withdrawalRoutes.get("/settings", authMiddleware, withdrawalController.settings);
+
 // User: buat request & lihat history
 withdrawalRoutes.post("/", authMiddleware, withdrawalController.create);
 withdrawalRoutes.get("/", authMiddleware, withdrawalController.list);

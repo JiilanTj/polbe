@@ -1,0 +1,1 @@
+ALTER TABLE "withdrawal_requests" ADD COLUMN "withdrawal_network" varchar(50);

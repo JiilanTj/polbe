@@ -6,6 +6,7 @@ export const withdrawalStatusEnum = pgEnum("withdrawal_status", ["pending", "app
 export const pollStatusEnum = pgEnum("poll_status", ["draft", "active", "resolved", "closed"]);
 export const livesTransactionTypeEnum = pgEnum("lives_transaction_type", [
   "purchase", "vote_debit", "vote_payout", "recovery", "referral_bonus", "admin_credit", "admin_debit",
+  "withdrawal_debit", "withdrawal_refund",
 ]);
 
 export const users = pgTable("users", {
@@ -133,9 +134,14 @@ export const withdrawalRequests = pgTable("withdrawal_requests", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").references(() => users.id).notNull(),
   usdtAmount: decimal("usdt_amount", { precision: 10, scale: 2 }).notNull(),  // gross amount
+  usdtDebited: decimal("usdt_debited", { precision: 10, scale: 2 }).default("0").notNull(),
+  livesDebited: decimal("lives_debited", { precision: 18, scale: 6 }).default("0").notNull(),
+  livesToUsdtRate: decimal("lives_to_usdt_rate", { precision: 10, scale: 4 }).default("0").notNull(),
+  withdrawalSource: varchar("withdrawal_source", { length: 20 }).default("usdt").notNull(), // usdt | lives | hybrid
   feePercent: decimal("fee_percent", { precision: 5, scale: 2 }).default("0").notNull(), // % fee saat create
   feeAmount: decimal("fee_amount", { precision: 10, scale: 2 }).default("0").notNull(),  // fee dalam USDT
   netAmount: decimal("net_amount", { precision: 10, scale: 2 }).notNull(),              // yang diterima user
+  withdrawalNetwork: varchar("withdrawal_network", { length: 50 }),
   walletAddress: varchar("wallet_address", { length: 100 }).notNull(), // alamat tujuan user
   txHash: varchar("tx_hash", { length: 150 }),    // diisi admin saat approve
   status: withdrawalStatusEnum("status").default("pending").notNull(),
@@ -357,6 +363,7 @@ export const notifications = pgTable("notifications", {
 export const platformSettings = pgTable("platform_settings", {
   id: serial("id").primaryKey(),
   withdrawalFeePercent: decimal("withdrawal_fee_percent", { precision: 5, scale: 2 }).default("1").notNull(), // default 1%
+  livesToUsdtRate: decimal("lives_to_usdt_rate", { precision: 10, scale: 4 }).default("1").notNull(),
   topupPaymentMethods: jsonb("topup_payment_methods"),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
   updatedBy: integer("updated_by").references(() => users.id),

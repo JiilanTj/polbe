@@ -84,11 +84,13 @@ export const topupCreateSchema = z.object({
 
 // ─── Withdrawal ───────────────────────────────────────────────
 export const withdrawalCreateSchema = z.object({
-  usdtAmount: z
-    .number()
-    .positive("usdtAmount harus > 0")
-    .min(1, "Minimum withdrawal 1 USDT"),
+  usdtAmount: z.number().min(0, "usdtAmount tidak boleh negatif").default(0),
+  livesAmount: z.number().min(0, "livesAmount tidak boleh negatif").default(0),
+  withdrawalNetwork: z.string().min(1, "withdrawalNetwork wajib diisi").max(50),
   walletAddress: z.string().min(5, "walletAddress wajib diisi"),
+}).refine((data) => data.usdtAmount > 0 || data.livesAmount > 0, {
+  message: "Minimal isi USDT atau Lives untuk withdrawal",
+  path: ["usdtAmount"],
 });
 
 // ─── Admin ────────────────────────────────────────────────────
