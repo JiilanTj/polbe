@@ -45,6 +45,7 @@ async function adjustLives(
 export const pollsController = {
   // GET /api/polls — daftar poll (publik)
   async list(c: Context) {
+    await pollsController._checkAutoClose();
     const pageParam = Number(c.req.query("page") || "1");
     const limitParam = Number(c.req.query("limit") || "20");
     const page = Number.isFinite(pageParam) ? Math.max(Math.floor(pageParam), 1) : 1;
@@ -111,6 +112,7 @@ export const pollsController = {
 
   // GET /api/polls/trending — poll aktif diurutkan berdasarkan totalVotes DESC
   async trending(c: Context) {
+    await pollsController._checkAutoClose();
     const limit = Math.min(Number(c.req.query("limit") || "10"), 50);
     const rows = await db
       .select()
@@ -147,6 +149,7 @@ export const pollsController = {
 
   // GET /api/polls/:id — detail poll + distribusi suara (Pool-based)
   async getById(c: Context) {
+    await pollsController._checkAutoClose();
     const id = safeInt(c.req.param("id"));
     if (!id) return c.json({ error: "ID poll tidak valid" }, 400);
 
@@ -288,6 +291,13 @@ export const pollsController = {
     const [poll] = await db.select().from(polls).where(eq(polls.id, id));
     if (!poll) return c.json({ error: "Poll tidak ditemukan" }, 404);
 
+    const isAdmin = me.role === "admin" || me.role === "platform";
+    const isCreator = poll.creatorId === Number(me.sub);
+
+    if (!isAdmin && !isCreator) {
+      return c.json({ error: "Anda tidak memiliki akses untuk mengubah status poll ini" }, 403);
+    }
+
     const [updated] = await db
       .update(polls)
       .set({ status: status as any, updatedAt: new Date() })
@@ -299,14 +309,16 @@ export const pollsController = {
       broadcastEvent("poll:activated", { pollId: updated.id, title: updated.title }, "polls");
     }
 
-    await db.insert(adminAuditLogs).values({
-      adminId: Number(me.sub),
-      action: "change_poll_status",
-      targetResourceId: id,
-      targetResourceType: "poll",
-      metadata: { from: poll.status, to: status },
-      ipAddress: requestIp(c),
-    });
+    if (isAdmin) {
+      await db.insert(adminAuditLogs).values({
+        adminId: Number(me.sub),
+        action: "change_poll_status",
+        targetResourceId: id,
+        targetResourceType: "poll",
+        metadata: { from: poll.status, to: status },
+        ipAddress: requestIp(c),
+      });
+    }
 
     return c.json({ data: updated });
   },
@@ -442,6 +454,13 @@ export const pollsController = {
     const [poll] = await db.select().from(polls).where(eq(polls.id, pollId));
     if (!poll || poll.status === "resolved") return c.json({ error: "Poll tidak valid atau sudah selesai" }, 400);
 
+    const isAdmin = me.role === "admin" || me.role === "platform";
+    const isCreator = poll.creatorId === Number(me.sub);
+
+    if (!isAdmin && !isCreator) {
+      return c.json({ error: "Anda tidak memiliki akses untuk me-resolve poll ini" }, 403);
+    }
+
     // Ambil semua suara
     const allVotes = await db.select().from(pollVotes).where(eq(pollVotes.pollId, pollId));
     const winnersVotes = allVotes.filter(v => v.optionIndex === winnerOptionIndex);
@@ -486,14 +505,16 @@ export const pollsController = {
       .set({ status: "resolved", winnerOptionIndex, resolvedAt: new Date(), resolvedBy: Number(me.sub) })
       .where(eq(polls.id, pollId));
 
-    await db.insert(adminAuditLogs).values({
-      adminId: Number(me.sub),
-      action: "resolve_poll",
-      targetResourceId: pollId,
-      targetResourceType: "poll",
-      metadata: { winnerOptionIndex, totalWinnersWagered, totalLosersWagered },
-      ipAddress: requestIp(c),
-    });
+    if (isAdmin) {
+      await db.insert(adminAuditLogs).values({
+        adminId: Number(me.sub),
+        action: "resolve_poll",
+        targetResourceId: pollId,
+        targetResourceType: "poll",
+        metadata: { winnerOptionIndex, totalWinnersWagered, totalLosersWagered },
+        ipAddress: requestIp(c),
+      });
+    }
 
     broadcastEvent("poll:resolved", { pollId, winnerOptionIndex }, "polls");
 
@@ -550,4 +571,20 @@ export const pollsController = {
 
     return c.json({ data: formatted });
   },
+
+  async _checkAutoClose() {
+    try {
+      await db
+        .update(polls)
+        .set({ status: "closed", updatedAt: new Date() })
+        .where(
+          and(
+            eq(polls.status, "active"),
+            sql`${polls.endAt} < now()`
+          )
+        );
+    } catch (e) {
+      console.error("Auto close failed", e);
+    }
+  }
 };
