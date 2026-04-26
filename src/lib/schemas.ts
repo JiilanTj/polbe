@@ -133,3 +133,8 @@ export const orderPlaceSchema = z.object({
 export const commentCreateSchema = z.object({
   body: z.string().min(1, "Komentar tidak boleh kosong").max(1000, "Komentar max 1000 karakter"),
 });
+
+// ─── Support Chat ─────────────────────────────────────────────
+export const chatMessageSchema = z.object({
+  body: z.string().min(1, "Pesan tidak boleh kosong").max(2000, "Pesan maksimal 2000 karakter"),
+});

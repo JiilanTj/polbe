@@ -354,6 +354,34 @@ export const notifications = pgTable("notifications", {
   idxUserUnread: index("notifications_user_unread").on(t.userId, t.isRead),
 }));
 
+// ─── Support Chat ─────────────────────────────────────────────────────────
+// Satu thread per user; admin manapun bisa membaca dan membalas.
+export const chatThreads = pgTable("chat_threads", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  lastMessagePreview: text("last_message_preview"),
+  lastMessageAt: timestamp("last_message_at"),
+  userUnreadCount: integer("user_unread_count").default(0).notNull(),
+  adminUnreadCount: integer("admin_unread_count").default(0).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  uniqueUser: uniqueIndex("chat_threads_user_id").on(t.userId),
+  idxLastMessageAt: index("chat_threads_last_message_at").on(t.lastMessageAt),
+}));
+
+export const chatMessages = pgTable("chat_messages", {
+  id: serial("id").primaryKey(),
+  threadId: integer("thread_id").notNull().references(() => chatThreads.id, { onDelete: "cascade" }),
+  senderId: integer("sender_id").notNull().references(() => users.id),
+  senderRole: varchar("sender_role", { length: 20 }).notNull(), // user | admin | platform
+  body: text("body").notNull(),
+  readAt: timestamp("read_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  idxThreadCreatedAt: index("chat_messages_thread_created_at").on(t.threadId, t.createdAt),
+}));
+
 // ─── Indexes untuk performance ─────────────────────────────────────────────
 // Indexes didefinisikan inline di masing-masing tabel melalui table config.
 // Migration SQL akan di-generate oleh drizzle-kit generate.
