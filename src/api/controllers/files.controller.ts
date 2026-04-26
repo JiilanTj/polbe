@@ -5,6 +5,15 @@ import { config } from "../../config";
 
 const BUCKET = config.minio.bucket;
 
+function contentTypeFromPath(path: string, fallback?: string) {
+  const cleanFallback = fallback && fallback !== "application/octet-stream" ? fallback : undefined;
+  const lower = path.toLowerCase();
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".webp")) return "image/webp";
+  return cleanFallback ?? "application/octet-stream";
+}
+
 export const filesController = {
   /**
    * Proxy request ke MinIO agar file diakses lewat domain backend.
@@ -26,9 +35,10 @@ export const filesController = {
       const dataStream = await minioClient.getObject(BUCKET, path);
 
       // Set headers
-      c.header("Content-Type", stat.metaData["content-type"] || "application/octet-stream");
+      c.header("Content-Type", contentTypeFromPath(path, stat.metaData["content-type"]));
       c.header("Content-Length", stat.size.toString());
       c.header("Cache-Control", "public, max-age=31536000"); // Cache 1 tahun (immutable)
+      c.header("Content-Disposition", "inline");
 
       // Stream data ke client
       return stream(c, async (stream) => {
