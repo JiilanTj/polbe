@@ -273,6 +273,7 @@ export const questionsController = {
       (question.description && (!descriptionId || sameText(descriptionId, question.description))) ||
       (question.resolutionCriteria && (!resolutionCriteriaId || sameText(resolutionCriteriaId, question.resolutionCriteria))) ||
       (question.marketType !== "binary");
+    const generatedIndonesianVersion = needsIndonesianBackfill;
 
     if (needsIndonesianBackfill) {
       const translated = await translateSingleQuestionToIndonesian({
@@ -351,6 +352,7 @@ export const questionsController = {
 
     return c.json({
       message: `Question #${id} berhasil dibuat menjadi poll aktif #${poll.id}`,
+      generatedIndonesianVersion,
       data: poll,
     }, 201);
   },
