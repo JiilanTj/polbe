@@ -525,8 +525,16 @@ export const pollsController = {
     const me = c.get("user") as TokenPayload;
     const id = safeInt(c.req.param("id"));
     if (!id) return c.json({ error: "ID poll tidak valid" }, 400);
-    const [poll] = await db.select({ id: polls.id, title: polls.title, status: polls.status }).from(polls).where(eq(polls.id, id));
+    const [poll] = await db.select().from(polls).where(eq(polls.id, id));
     if (!poll) return c.json({ error: "Poll tidak ditemukan" }, 404);
+
+    const isAdmin = me.role === "admin" || me.role === "platform";
+    const isCreator = poll.creatorId === Number(me.sub);
+
+    if (!isAdmin && !isCreator) {
+      return c.json({ error: "Anda tidak memiliki akses untuk menghapus poll ini" }, 403);
+    }
+
     await db.delete(pollVotes).where(eq(pollVotes.pollId, id));
     await db.delete(polls).where(eq(polls.id, id));
     await db.insert(adminAuditLogs).values({

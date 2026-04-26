@@ -260,6 +260,38 @@ export const meController = {
     });
   },
 
+  // GET /api/me/polls/created — poll yang dibuat oleh user ini
+  async createdPolls(c: Context) {
+    const me = c.get("user") as TokenPayload;
+    const page = Number(c.req.query("page") || "1");
+    const limit = Math.min(Number(c.req.query("limit") || "20"), 100);
+    const offset = (page - 1) * limit;
+
+    const rows = await db
+      .select()
+      .from(polls)
+      .where(eq(polls.creatorId, Number(me.sub)))
+      .orderBy(desc(polls.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    const countResult = await db
+      .select({ total: sql<number>`count(*)` })
+      .from(polls)
+      .where(eq(polls.creatorId, Number(me.sub)));
+    const total = countResult[0]?.total ?? 0;
+
+    return c.json({
+      data: rows,
+      pagination: {
+        page,
+        limit,
+        total: Number(total),
+        totalPages: Math.ceil(Number(total) / limit),
+      },
+    });
+  },
+
   // GET /api/me/portfolio — posisi pool dari riwayat pasang nyawa user
   async portfolio(c: Context) {
     const me = c.get("user") as TokenPayload;

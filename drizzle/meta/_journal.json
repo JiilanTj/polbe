@@ -148,6 +148,13 @@
       "when": 1777201322762,
       "tag": "0020_safe_catseye",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1777209311943,
+      "tag": "0021_mean_franklin_richards",
+      "breakpoints": true
     }
   ]
 }
