@@ -134,6 +134,13 @@
       "when": 1777179987908,
       "tag": "0018_perfect_darkhawk",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1777181237722,
+      "tag": "0019_skinny_mister_sinister",
+      "breakpoints": true
     }
   ]
 }

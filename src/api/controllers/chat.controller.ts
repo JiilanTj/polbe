@@ -3,6 +3,7 @@ import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { db } from "../../db";
 import { chatMessages, chatThreads, users } from "../../db/schema";
 import type { TokenPayload } from "../../lib/jwt";
+import { getPublicUrl } from "../../lib/minio";
 import { parseBody, escapeHtml, safeInt } from "../../lib/validate";
 import { chatMessageSchema } from "../../lib/schemas";
 import { broadcastEvent } from "../../ws/handler";
@@ -22,8 +23,16 @@ async function getOrCreateThread(userId: number) {
   return created;
 }
 
-function messagePreview(body: string) {
-  return body.length > 160 ? `${body.slice(0, 157)}...` : body;
+function messagePreview(body: string, mediaUrl?: string | null) {
+  const preview = body.trim() || (mediaUrl ? "Foto" : "");
+  return preview.length > 160 ? `${preview.slice(0, 157)}...` : preview;
+}
+
+function serializeMessage<T extends { mediaUrl?: string | null }>(message: T) {
+  return {
+    ...message,
+    mediaUrl: getPublicUrl(message.mediaUrl),
+  };
 }
 
 function isAdminRole(role: string) {
@@ -61,6 +70,8 @@ async function listMessages(threadId: number) {
       senderId: chatMessages.senderId,
       senderRole: chatMessages.senderRole,
       body: chatMessages.body,
+      mediaUrl: chatMessages.mediaUrl,
+      mediaType: chatMessages.mediaType,
       readAt: chatMessages.readAt,
       createdAt: chatMessages.createdAt,
       senderUsername: users.username,
@@ -78,6 +89,8 @@ async function insertMessage(params: {
   senderId: number;
   senderRole: string;
   body: string;
+  mediaUrl?: string;
+  mediaType?: "image";
 }) {
   const cleanBody = escapeHtml(params.body.trim());
   const now = new Date();
@@ -89,13 +102,16 @@ async function insertMessage(params: {
       senderId: params.senderId,
       senderRole: params.senderRole,
       body: cleanBody,
+      mediaUrl: params.mediaUrl,
+      mediaType: params.mediaUrl ? (params.mediaType ?? "image") : null,
     })
     .returning();
+  if (!message) throw new Error("Gagal membuat pesan chat");
 
   await db
     .update(chatThreads)
     .set({
-      lastMessagePreview: messagePreview(cleanBody),
+      lastMessagePreview: messagePreview(cleanBody, params.mediaUrl),
       lastMessageAt: now,
       userUnreadCount: params.senderRole === "user" ? sql`${chatThreads.userUnreadCount}` : sql`${chatThreads.userUnreadCount} + 1`,
       adminUnreadCount: params.senderRole === "user" ? sql`${chatThreads.adminUnreadCount} + 1` : sql`${chatThreads.adminUnreadCount}`,
@@ -104,7 +120,7 @@ async function insertMessage(params: {
     .where(eq(chatThreads.id, params.threadId));
 
   const payload = {
-    ...message,
+    ...serializeMessage(message),
     threadUserId: params.threadUserId,
   };
 
@@ -122,7 +138,7 @@ export const chatController = {
     const thread = await getOrCreateThread(userId);
     await markRead(thread.id, "user");
     const messages = await listMessages(thread.id);
-    return c.json({ data: { thread, messages } });
+    return c.json({ data: { thread, messages: messages.map(serializeMessage) } });
   },
 
   // POST /api/chat/messages — user kirim pesan ke admin
@@ -139,9 +155,11 @@ export const chatController = {
       senderId: userId,
       senderRole: "user",
       body: body.body,
+      mediaUrl: body.mediaUrl,
+      mediaType: body.mediaType,
     });
 
-    return c.json({ data: message }, 201);
+    return c.json({ data: serializeMessage(message) }, 201);
   },
 
   // GET /api/chat/admin/threads — inbox semua user untuk admin
@@ -175,7 +193,7 @@ export const chatController = {
     const thread = await getOrCreateThread(userId);
     await markRead(thread.id, "admin");
     const messages = await listMessages(thread.id);
-    return c.json({ data: { thread, messages } });
+    return c.json({ data: { thread, messages: messages.map(serializeMessage) } });
   },
 
   // POST /api/chat/admin/threads/:userId/messages — admin manapun membalas user
@@ -199,8 +217,10 @@ export const chatController = {
       senderId: Number(me.sub),
       senderRole: me.role,
       body: body.body,
+      mediaUrl: body.mediaUrl,
+      mediaType: body.mediaType,
     });
 
-    return c.json({ data: message }, 201);
+    return c.json({ data: serializeMessage(message) }, 201);
   },
 };

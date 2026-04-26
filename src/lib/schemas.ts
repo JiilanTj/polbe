@@ -136,5 +136,10 @@ export const commentCreateSchema = z.object({
 
 // ─── Support Chat ─────────────────────────────────────────────
 export const chatMessageSchema = z.object({
-  body: z.string().min(1, "Pesan tidak boleh kosong").max(2000, "Pesan maksimal 2000 karakter"),
+  body: z.string().max(2000, "Pesan maksimal 2000 karakter").optional().default(""),
+  mediaUrl: z.string().max(1000).optional(),
+  mediaType: z.enum(["image"]).optional(),
+}).refine((data) => data.body.trim().length > 0 || !!data.mediaUrl, {
+  message: "Pesan atau foto wajib diisi",
+  path: ["body"],
 });

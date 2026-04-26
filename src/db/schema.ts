@@ -376,6 +376,8 @@ export const chatMessages = pgTable("chat_messages", {
   senderId: integer("sender_id").notNull().references(() => users.id),
   senderRole: varchar("sender_role", { length: 20 }).notNull(), // user | admin | platform
   body: text("body").notNull(),
+  mediaUrl: text("media_url"),
+  mediaType: varchar("media_type", { length: 20 }),
   readAt: timestamp("read_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({

@@ -8,11 +8,10 @@ const ALLOWED_TYPES: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
   "image/webp": "webp",
-  "image/gif": "gif",
 };
 
-// Max 5 MB
-const MAX_SIZE_BYTES = 5 * 1024 * 1024;
+// Max 10 MB
+const MAX_SIZE_BYTES = 10 * 1024 * 1024;
 
 export const uploadController = {
   /**
@@ -43,7 +42,7 @@ export const uploadController = {
     }
 
     if (file.size > MAX_SIZE_BYTES) {
-      return c.json({ error: `Ukuran file melebihi batas 5 MB (diterima: ${(file.size / 1024 / 1024).toFixed(2)} MB)` }, 413);
+      return c.json({ error: `Ukuran file melebihi batas 10 MB (diterima: ${(file.size / 1024 / 1024).toFixed(2)} MB)` }, 413);
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
