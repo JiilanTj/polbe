@@ -141,6 +141,13 @@
       "when": 1777181237722,
       "tag": "0019_skinny_mister_sinister",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1777201322762,
+      "tag": "0020_safe_catseye",
+      "breakpoints": true
     }
   ]
 }

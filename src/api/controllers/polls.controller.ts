@@ -208,7 +208,7 @@ export const pollsController = {
     if (body instanceof Response) return body;
 
     const {
-      title, description, category, options, imageUrl,
+      title, titleId, description, descriptionId, category, options, optionsId, imageUrl,
       startAt, endAt, livesPerVote, platformFeePercent,
       sourceArticleIds, aiGenerated,
     } = body;
@@ -217,9 +217,14 @@ export const pollsController = {
       .insert(polls)
       .values({
         title: escapeHtml(title.trim()),
+        titleId: titleId ? escapeHtml(titleId.trim()) : escapeHtml(title.trim()),
         description: description ? escapeHtml(description) : null,
+        descriptionId: descriptionId ? escapeHtml(descriptionId) : (description ? escapeHtml(description) : null),
         category: category ?? null,
         options: options.map((o: string) => escapeHtml(o)),
+        optionsId: Array.isArray(optionsId)
+          ? optionsId.map((o: string) => escapeHtml(o))
+          : options.map((o: string) => (o === "Yes" ? "Ya" : o === "No" ? "Tidak" : escapeHtml(o))),
         imageUrl: imageUrl ?? null,
         status: "draft",
         creatorId: Number(me.sub),

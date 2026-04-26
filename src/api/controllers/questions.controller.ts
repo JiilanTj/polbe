@@ -80,7 +80,9 @@ export const questionsController = {
 
     const {
       question,
+      questionId,
       description,
+      descriptionId,
       category,
       tags,
       imageUrl,
@@ -92,6 +94,7 @@ export const questionsController = {
       resolutionDate,
       resolutionSource,
       resolutionCriteria,
+      resolutionCriteriaId,
       sourceArticleIds,
       status = "draft",
     } = body as Record<string, any>;
@@ -135,8 +138,10 @@ export const questionsController = {
       .insert(generatedQuestions)
       .values({
         question: question.trim(),
+        questionId: questionId?.trim() ?? question.trim(),
         slug,
         description: description ?? null,
+        descriptionId: descriptionId ?? description ?? null,
         category: category ?? null,
         tags: Array.isArray(tags) ? tags : null,
         imageUrl: imageUrl ?? null,
@@ -148,6 +153,7 @@ export const questionsController = {
         resolutionDate: new Date(resolutionDate),
         resolutionSource: resolutionSource ?? null,
         resolutionCriteria: resolutionCriteria ?? null,
+        resolutionCriteriaId: resolutionCriteriaId ?? resolutionCriteria ?? null,
         sourceArticleIds: Array.isArray(sourceArticleIds) ? sourceArticleIds : null,
         status: status as QuestionStatus,
       })
@@ -254,9 +260,12 @@ export const questionsController = {
         .insert(polls)
         .values({
           title: escapeHtml(question.question.trim()),
+          titleId: question.questionId ? escapeHtml(question.questionId.trim()) : escapeHtml(question.question.trim()),
           description: question.description ? escapeHtml(question.description) : null,
+          descriptionId: question.descriptionId ? escapeHtml(question.descriptionId) : (question.description ? escapeHtml(question.description) : null),
           category: question.category ?? null,
           options: outcomes.map((outcome) => escapeHtml(outcome)),
+          optionsId: question.marketType === "binary" ? ["Ya", "Tidak"] : outcomes.map((outcome) => escapeHtml(outcome)),
           imageUrl: question.imageUrl ?? null,
           status: "active",
           creatorId: Number(me.sub),
@@ -314,12 +323,16 @@ export const questionsController = {
     for (const q of questions) {
       await db.insert(generatedQuestions).values({
         question: q.question,
+        questionId: q.questionId ?? q.question,
         slug: toSlug(q.question),
         description: q.description,
+        descriptionId: q.descriptionId ?? q.description,
         category: q.category,
         resolutionDate: new Date(q.resolutionDate),
         aiModel: config.openai.model,
         confidenceScore: String(q.confidenceScore),
+        resolutionCriteria: q.resolutionCriteria,
+        resolutionCriteriaId: q.resolutionCriteriaId ?? q.resolutionCriteria,
         status: "draft",
         marketType: "binary",
         outcomes: ["Yes", "No"],

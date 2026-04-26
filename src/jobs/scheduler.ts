@@ -84,11 +84,15 @@ async function runScrapeJob() {
       for (const q of questions) {
         await db.insert(generatedQuestions).values({
           question: q.question,
+          questionId: q.questionId ?? q.question,
           description: q.description,
+          descriptionId: q.descriptionId ?? q.description,
           category: q.category,
           resolutionDate: new Date(q.resolutionDate),
           aiModel: config.openai.model,
           confidenceScore: String(q.confidenceScore),
+          resolutionCriteria: q.resolutionCriteria,
+          resolutionCriteriaId: q.resolutionCriteriaId ?? q.resolutionCriteria,
           status: "draft",
         });
       }

@@ -47,12 +47,15 @@ export const updateProfileSchema = z
 // ─── Polls ────────────────────────────────────────────────────
 export const pollCreateSchema = z.object({
   title: z.string().min(5, "Judul minimal 5 karakter").max(500),
+  titleId: z.string().min(5, "Judul ID minimal 5 karakter").max(500).optional(),
   description: z.string().max(2000).optional(),
+  descriptionId: z.string().max(2000).optional(),
   category: z.string().max(100).optional(),
   options: z
     .array(z.string().min(1).max(200))
     .min(2, "Minimal 2 opsi")
     .max(10, "Maksimal 10 opsi"),
+  optionsId: z.array(z.string().min(1).max(200)).min(2, "Minimal 2 opsi").max(10, "Maksimal 10 opsi").optional(),
   imageUrl: z.string().optional(),
   startAt: z.string().datetime({ message: "startAt harus ISO datetime" }).optional(),
   endAt: z.string().datetime({ message: "endAt harus ISO datetime" }).optional(),
@@ -60,6 +63,9 @@ export const pollCreateSchema = z.object({
   platformFeePercent: z.number().min(0).max(100).default(30),
   sourceArticleIds: z.array(z.number().int()).optional(),
   aiGenerated: z.boolean().default(false),
+}).refine((data) => !data.optionsId || data.optionsId.length === data.options.length, {
+  message: "optionsId harus sama jumlahnya dengan options",
+  path: ["optionsId"],
 });
 
 export const pollVoteSchema = z.object({

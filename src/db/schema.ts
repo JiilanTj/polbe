@@ -64,8 +64,10 @@ export const generatedQuestions = pgTable("generated_questions", {
 
   // ─── Core ────────────────────────────────────────────────────────
   question: text("question").notNull(),
+  questionId: text("question_id"),
   slug: varchar("slug", { length: 300 }).unique(),
   description: text("description"),
+  descriptionId: text("description_id"),
   category: varchar("category", { length: 100 }),
   tags: text("tags").array(),
   imageUrl: text("image_url"),
@@ -82,6 +84,7 @@ export const generatedQuestions = pgTable("generated_questions", {
   resolutionDate: timestamp("resolution_date"),
   resolutionSource: text("resolution_source"), // URL/source used to resolve
   resolutionCriteria: text("resolution_criteria"), // explicit YES/NO criteria
+  resolutionCriteriaId: text("resolution_criteria_id"),
   resolvedOutcome: text("resolved_outcome"),   // filled when status = resolved
 
   // ─── Status & Ownership ──────────────────────────────────────────
@@ -156,9 +159,12 @@ export const withdrawalRequests = pgTable("withdrawal_requests", {
 export const polls = pgTable("polls", {
   id: serial("id").primaryKey(),
   title: text("title").notNull(),
+  titleId: text("title_id"),
   description: text("description"),
+  descriptionId: text("description_id"),
   category: varchar("category", { length: 100 }),
   options: text("options").array().notNull(),           // ["Opsi A", "Opsi B", "Opsi C"]
+  optionsId: text("options_id").array(),
   imageUrl: text("image_url"),
   status: pollStatusEnum("status").default("draft").notNull(),
   creatorId: integer("creator_id").references(() => users.id),
