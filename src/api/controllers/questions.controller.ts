@@ -2,7 +2,7 @@ import type { Context } from "hono";
 import { db } from "../../db";
 import { adminAuditLogs, articles, generatedQuestions, polls } from "../../db/schema";
 import { and, desc, eq, sql } from "drizzle-orm";
-import { generateQuestions } from "../../ai/question-generator";
+import { generateQuestions, translateSingleQuestionToIndonesian } from "../../ai/question-generator";
 import { config } from "../../config";
 import type { TokenPayload } from "../../lib/jwt";
 import { escapeHtml } from "../../lib/validate";
@@ -29,6 +29,20 @@ function toSlug(text: string): string {
     "-" +
     Date.now()
   );
+}
+
+function sameText(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+function defaultIndonesianOutcomes(outcomes: string[]): string[] {
+  return outcomes.map((item) => {
+    const lower = item.trim().toLowerCase();
+    if (lower === "yes") return "Ya";
+    if (lower === "no") return "Tidak";
+    return item;
+  });
 }
 
 export const questionsController = {
@@ -246,6 +260,36 @@ export const questionsController = {
       return c.json({ error: "Question harus punya minimal 2 outcomes untuk dijadikan poll" }, 422);
     }
 
+    let questionId = question.questionId ?? null;
+    let descriptionId = question.descriptionId ?? null;
+    let resolutionCriteriaId = question.resolutionCriteriaId ?? null;
+    let optionsId = question.marketType === "binary"
+      ? ["Ya", "Tidak"]
+      : defaultIndonesianOutcomes(outcomes);
+
+    const needsIndonesianBackfill =
+      !questionId ||
+      sameText(questionId, question.question) ||
+      (question.description && (!descriptionId || sameText(descriptionId, question.description))) ||
+      (question.resolutionCriteria && (!resolutionCriteriaId || sameText(resolutionCriteriaId, question.resolutionCriteria))) ||
+      (question.marketType !== "binary");
+
+    if (needsIndonesianBackfill) {
+      const translated = await translateSingleQuestionToIndonesian({
+        question: question.question,
+        description: question.description,
+        resolutionCriteria: question.resolutionCriteria,
+        outcomes,
+      });
+      questionId = translated.questionId || questionId || question.question;
+      descriptionId = translated.descriptionId || descriptionId || question.description || null;
+      resolutionCriteriaId =
+        translated.resolutionCriteriaId || resolutionCriteriaId || question.resolutionCriteria || null;
+      if (translated.outcomesId.length === outcomes.length) {
+        optionsId = translated.outcomesId;
+      }
+    }
+
     const [existingPoll] = await db
       .select({ id: polls.id })
       .from(polls)
@@ -256,16 +300,28 @@ export const questionsController = {
     }
 
     const [poll] = await db.transaction(async (tx) => {
+      await tx
+        .update(generatedQuestions)
+        .set({
+          questionId: questionId ?? question.question,
+          descriptionId: descriptionId ?? question.description ?? null,
+          resolutionCriteriaId: resolutionCriteriaId ?? question.resolutionCriteria ?? null,
+          status: "active",
+          startDate: question.startDate ?? new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(generatedQuestions.id, id));
+
       const [createdPoll] = await tx
         .insert(polls)
         .values({
           title: escapeHtml(question.question.trim()),
-          titleId: question.questionId ? escapeHtml(question.questionId.trim()) : escapeHtml(question.question.trim()),
+          titleId: escapeHtml((questionId ?? question.question).trim()),
           description: question.description ? escapeHtml(question.description) : null,
-          descriptionId: question.descriptionId ? escapeHtml(question.descriptionId) : (question.description ? escapeHtml(question.description) : null),
+          descriptionId: descriptionId ? escapeHtml(descriptionId) : (question.description ? escapeHtml(question.description) : null),
           category: question.category ?? null,
           options: outcomes.map((outcome) => escapeHtml(outcome)),
-          optionsId: question.marketType === "binary" ? ["Ya", "Tidak"] : outcomes.map((outcome) => escapeHtml(outcome)),
+          optionsId: optionsId.map((outcome) => escapeHtml(outcome)),
           imageUrl: question.imageUrl ?? null,
           status: "active",
           creatorId: Number(me.sub),
@@ -277,15 +333,6 @@ export const questionsController = {
           platformFeePercent: "30",
         })
         .returning();
-
-      await tx
-        .update(generatedQuestions)
-        .set({
-          status: "active",
-          startDate: question.startDate ?? new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(generatedQuestions.id, id));
 
       return [createdPoll];
     });
