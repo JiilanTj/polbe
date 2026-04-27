@@ -8,6 +8,7 @@ import { broadcastEvent } from "../../ws/handler";
 import { parseBody, safeInt, escapeHtml } from "../../lib/validate";
 import { pollCreateSchema, pollVoteSchema, pollResolveSchema, pollStatusSchema } from "../../lib/schemas";
 import { getPublicUrl } from "../../lib/minio";
+import { translateSinglePollContent } from "../../ai/question-generator";
 
 function requestIp(c: Context) {
   return c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? null;
@@ -211,7 +212,7 @@ export const pollsController = {
     if (body instanceof Response) return body;
 
     const {
-      title, titleId, description, descriptionId, category, options, optionsId, imageUrl,
+      sourceLanguage, title, titleId, description, descriptionId, category, options, optionsId, imageUrl,
       startAt, endAt, livesPerVote, platformFeePercent,
       sourceArticleIds, aiGenerated,
     } = body;
@@ -233,18 +234,26 @@ export const pollsController = {
       }
     }
 
+    const sourceTitle = sourceLanguage === "id" && titleId ? titleId : title;
+    const sourceDescription = sourceLanguage === "id" && descriptionId ? descriptionId : description;
+    const sourceOptions = sourceLanguage === "id" && Array.isArray(optionsId) ? optionsId : options;
+    const translated = await translateSinglePollContent({
+      sourceLanguage,
+      title: sourceTitle,
+      description: sourceDescription,
+      options: sourceOptions,
+    });
+
     const [poll] = await db
       .insert(polls)
       .values({
-        title: escapeHtml(title.trim()),
-        titleId: titleId ? escapeHtml(titleId.trim()) : escapeHtml(title.trim()),
-        description: description ? escapeHtml(description) : null,
-        descriptionId: descriptionId ? escapeHtml(descriptionId) : (description ? escapeHtml(description) : null),
+        title: escapeHtml(translated.title.trim()),
+        titleId: escapeHtml(translated.titleId.trim()),
+        description: translated.description ? escapeHtml(translated.description) : null,
+        descriptionId: translated.descriptionId ? escapeHtml(translated.descriptionId) : null,
         category: category ?? null,
-        options: options.map((o: string) => escapeHtml(o)),
-        optionsId: Array.isArray(optionsId)
-          ? optionsId.map((o: string) => escapeHtml(o))
-          : options.map((o: string) => (o === "Yes" ? "Ya" : o === "No" ? "Tidak" : escapeHtml(o))),
+        options: translated.options.map((o: string) => escapeHtml(o)),
+        optionsId: translated.optionsId.map((o: string) => escapeHtml(o)),
         imageUrl: imageUrl ?? null,
         status: "draft",
         creatorId: Number(me.sub),

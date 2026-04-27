@@ -46,6 +46,7 @@ export const updateProfileSchema = z
 
 // ─── Polls ────────────────────────────────────────────────────
 export const pollCreateSchema = z.object({
+  sourceLanguage: z.enum(["en", "id"]).default("en"),
   title: z.string().min(5, "Judul minimal 5 karakter").max(500),
   titleId: z.string().min(5, "Judul ID minimal 5 karakter").max(500).optional(),
   description: z.string().max(2000).optional(),

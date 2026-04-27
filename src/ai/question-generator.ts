@@ -29,6 +29,22 @@ export interface SingleQuestionTranslationResult {
   outcomesId: string[];
 }
 
+export interface SinglePollTranslationInput {
+  sourceLanguage: "en" | "id";
+  title: string;
+  description?: string | null;
+  options: string[];
+}
+
+export interface SinglePollTranslationResult {
+  title: string;
+  titleId: string;
+  description: string | null;
+  descriptionId: string | null;
+  options: string[];
+  optionsId: string[];
+}
+
 type PartialGeneratedQuestion = Partial<GeneratedQuestion> & Record<string, unknown>;
 
 function stripCodeFences(raw: string): string {
@@ -54,6 +70,15 @@ function normalizeOutcomeFallback(outcomes: string[]): string[] {
     const lower = item.trim().toLowerCase();
     if (lower === "yes") return "Ya";
     if (lower === "no") return "Tidak";
+    return item;
+  });
+}
+
+function normalizeEnglishOutcomeFallback(outcomes: string[]): string[] {
+  return outcomes.map((item) => {
+    const lower = item.trim().toLowerCase();
+    if (lower === "ya") return "Yes";
+    if (lower === "tidak") return "No";
     return item;
   });
 }
@@ -158,6 +183,92 @@ Rules:
     };
   } catch (error) {
     console.error("[QuestionGen] Failed single-question Indonesian translation:", error);
+    return baseFallback;
+  }
+}
+
+export async function translateSinglePollContent(
+  input: SinglePollTranslationInput,
+): Promise<SinglePollTranslationResult> {
+  const title = input.title.trim();
+  const description = input.description?.trim() || null;
+  const options = input.options.map((item) => item.trim()).filter(Boolean);
+
+  const baseFallback: SinglePollTranslationResult = input.sourceLanguage === "id"
+    ? {
+        title: title,
+        titleId: title,
+        description,
+        descriptionId: description,
+        options: normalizeEnglishOutcomeFallback(options),
+        optionsId: options,
+      }
+    : {
+        title,
+        titleId: title,
+        description,
+        descriptionId: description,
+        options,
+        optionsId: normalizeOutcomeFallback(options),
+      };
+
+  if (!config.openai.apiKey || !title || options.length === 0) return baseFallback;
+
+  const targetLanguage = input.sourceLanguage === "id" ? "English" : "Bahasa Indonesia";
+  const sourceLanguage = input.sourceLanguage === "id" ? "Bahasa Indonesia" : "English";
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: config.openai.model,
+      messages: [
+        {
+          role: "system",
+          content: `You are an expert ${sourceLanguage}-to-${targetLanguage} translator for prediction market content.
+Return ONLY valid JSON object with this exact shape:
+{"title":"...","titleId":"...","description":"...","descriptionId":"...","options":["..."],"optionsId":["..."]}
+Rules:
+- Preserve the exact meaning and prediction-market framing.
+- Keep option count exactly the same as input options count.
+- If source is English, copy original English into title/description/options and translate Indonesian into titleId/descriptionId/optionsId.
+- If source is Bahasa Indonesia, translate English into title/description/options and copy original Indonesian into titleId/descriptionId/optionsId.
+- If description is empty in input, return empty string for both description fields.`,
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            sourceLanguage: input.sourceLanguage,
+            title,
+            description: description ?? "",
+            options,
+          }),
+        },
+      ],
+      temperature: 0.2,
+    });
+
+    const raw = response.choices[0]?.message?.content;
+    if (!raw) return baseFallback;
+
+    const parsed = JSON.parse(stripCodeFences(raw)) as Record<string, unknown>;
+    const translatedOptions = Array.isArray(parsed.options)
+      ? parsed.options.map((item) => toText(item)).filter(Boolean)
+      : [];
+    const translatedOptionsId = Array.isArray(parsed.optionsId)
+      ? parsed.optionsId.map((item) => toText(item)).filter(Boolean)
+      : [];
+
+    return {
+      title: toText(parsed.title) || baseFallback.title,
+      titleId: toText(parsed.titleId) || baseFallback.titleId,
+      description: toText(parsed.description) || baseFallback.description,
+      descriptionId: toText(parsed.descriptionId) || baseFallback.descriptionId,
+      options: translatedOptions.length === options.length ? translatedOptions : baseFallback.options,
+      optionsId: translatedOptionsId.length === options.length
+        ? translatedOptionsId
+        : baseFallback.optionsId,
+    };
+  } catch (error) {
+    console.error("[QuestionGen] Failed poll content translation:", error);
     return baseFallback;
   }
 }
