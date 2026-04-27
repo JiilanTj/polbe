@@ -4,7 +4,7 @@ import { users, livesTransactions, topupRequests, withdrawalRequests, polls, ord
 import { eq, desc, ilike, sql, or, and } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { parseBody, safeInt } from "../../lib/validate";
-import { adminCreditSchema, adminRoleSchema } from "../../lib/schemas";
+import { adminCreditSchema, adminMasterSchema, adminRoleSchema } from "../../lib/schemas";
 
 type TopupPaymentMethod = {
   network: string;
@@ -71,6 +71,8 @@ export const adminController = {
     }
     if (role === 'contributor') {
       conditions.push(sql`${users.contributorUntil} > now()`);
+    } else if (role === 'master') {
+      conditions.push(and(eq(users.role, "user"), eq(users.isMaster, true)));
     } else if (role) {
       conditions.push(eq(users.role, role as any));
     }
@@ -81,9 +83,12 @@ export const adminController = {
         email: users.email,
         username: users.username,
         role: users.role,
+        isMaster: users.isMaster,
         isActive: users.isActive,
+        usdtBalance: users.usdtBalance,
         livesBalance: users.livesBalance,
         livesRecoveryAt: users.livesRecoveryAt,
+        contributorUntil: users.contributorUntil,
         referralCode: users.referralCode,
         referredBy: users.referredBy,
         createdAt: users.createdAt,
@@ -119,9 +124,12 @@ export const adminController = {
         email: users.email,
         username: users.username,
         role: users.role,
+        isMaster: users.isMaster,
         isActive: users.isActive,
+        usdtBalance: users.usdtBalance,
         livesBalance: users.livesBalance,
         livesRecoveryAt: users.livesRecoveryAt,
+        contributorUntil: users.contributorUntil,
         referralCode: users.referralCode,
         referredBy: users.referredBy,
         createdAt: users.createdAt,
@@ -141,6 +149,46 @@ export const adminController = {
       .limit(10);
 
     return c.json({ data: { ...user, recentTransactions: recentTx } });
+  },
+
+  // PATCH /api/admin/users/:id/master — aktifkan / nonaktifkan status master affiliate
+  async setMaster(c: Context) {
+    const me = c.get("user") as TokenPayload;
+    const id = safeInt(c.req.param("id"));
+    if (!id) return c.json({ error: "ID user tidak valid" }, 400);
+
+    const body = await parseBody(c, adminMasterSchema);
+    if (body instanceof Response) return body;
+
+    const [target] = await db
+      .select({ id: users.id, username: users.username, role: users.role, isMaster: users.isMaster })
+      .from(users)
+      .where(eq(users.id, id));
+    if (!target) return c.json({ error: "User tidak ditemukan" }, 404);
+    if (target.role !== "user") {
+      return c.json({ error: "Status master hanya bisa diberikan ke akun role user" }, 400);
+    }
+
+    const [updated] = await db
+      .update(users)
+      .set({ isMaster: body.isMaster, updatedAt: new Date() })
+      .where(eq(users.id, id))
+      .returning({ id: users.id, username: users.username, isMaster: users.isMaster });
+
+    if (!updated) return c.json({ error: "User tidak ditemukan" }, 404);
+
+    await db.insert(adminAuditLogs).values({
+      adminId: Number(me.sub),
+      action: body.isMaster ? "enable_master" : "disable_master",
+      targetUserId: id,
+      metadata: { from: target.isMaster, to: body.isMaster },
+      ipAddress: c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? null,
+    });
+
+    return c.json({
+      message: `Status master @${updated.username} ${updated.isMaster ? "diaktifkan" : "dinonaktifkan"}`,
+      data: updated,
+    });
   },
 
   // PATCH /api/admin/users/:id/toggle — aktifkan / nonaktifkan akun
@@ -241,9 +289,9 @@ export const adminController = {
 
     const [updated] = await db
       .update(users)
-      .set({ role: role as any, updatedAt: new Date() })
+      .set({ role: role as any, ...(role !== "user" ? { isMaster: false } : {}), updatedAt: new Date() })
       .where(eq(users.id, id))
-      .returning({ id: users.id, username: users.username, role: users.role });
+      .returning({ id: users.id, username: users.username, role: users.role, isMaster: users.isMaster });
 
     if (!updated) return c.json({ error: "User tidak ditemukan" }, 404);
 

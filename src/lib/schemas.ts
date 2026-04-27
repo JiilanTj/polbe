@@ -110,6 +110,10 @@ export const adminRoleSchema = z.object({
   role: z.enum(["user", "admin", "platform"]),
 });
 
+export const adminMasterSchema = z.object({
+  isMaster: z.boolean(),
+});
+
 export const adminTopupActionSchema = z.object({
   note: z.string().max(500).optional(),
   txHash: z.string().optional(),

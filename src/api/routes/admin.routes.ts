@@ -12,6 +12,7 @@ adminRoutes.get("/users", adminController.listUsers);
 adminRoutes.get("/users/:id", adminController.getUser);
 adminRoutes.patch("/users/:id/toggle", adminMutationRateLimit, adminController.toggleUser);
 adminRoutes.patch("/users/:id/role", adminMutationRateLimit, adminController.changeRole);
+adminRoutes.patch("/users/:id/master", adminMutationRateLimit, adminController.setMaster);
 adminRoutes.post("/users/:id/credit", adminMutationRateLimit, adminController.creditLives);
 
 // ─── Audit endpoints ────────────────────────────────────────────────────────

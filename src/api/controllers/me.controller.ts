@@ -29,6 +29,7 @@ export const meController = {
         email: users.email,
         username: users.username,
         role: users.role,
+        isMaster: users.isMaster,
         isActive: users.isActive,
         avatarUrl: users.avatarUrl,
         emailVerifiedAt: users.emailVerifiedAt,

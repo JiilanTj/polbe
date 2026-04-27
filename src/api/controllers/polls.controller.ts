@@ -1,6 +1,16 @@
 import type { Context } from "hono";
 import { db } from "../../db";
-import { adminAuditLogs, polls, pollVotes, users, livesTransactions, notifications, priceSnapshots } from "../../db/schema";
+import {
+  adminAuditLogs,
+  masterReferralEarnings,
+  notifications,
+  platformSettings,
+  polls,
+  pollVotes,
+  priceSnapshots,
+  users,
+  livesTransactions,
+} from "../../db/schema";
 import { eq, desc, sql, and, ilike, type SQL } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { verifyAccessToken } from "../../lib/jwt";
@@ -13,6 +23,8 @@ import { translateSinglePollContent } from "../../ai/question-generator";
 function requestIp(c: Context) {
   return c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? null;
 }
+
+const MASTER_COMMISSION_RATE = 0.03;
 
 // ─── Helper: kredit/debit nyawa + catat transaksi ──────────────────────────
 async function adjustLives(
@@ -509,6 +521,81 @@ export const pollsController = {
       }
     }
 
+    const losingUserWagers: Record<number, number> = {};
+    losersVotes.forEach((vote) => {
+      losingUserWagers[vote.userId] = (losingUserWagers[vote.userId] || 0) + Number(vote.livesWagered);
+    });
+
+    const [settings] = await db.select({ livesToUsdtRate: platformSettings.livesToUsdtRate }).from(platformSettings).limit(1);
+    const livesToUsdtRate = Number(settings?.livesToUsdtRate ?? 1);
+    const masterCommissions: Array<{
+      masterId: number;
+      refereeId: number;
+      livesWagered: number;
+      commissionLives: number;
+      usdtEarned: number;
+    }> = [];
+
+    for (const [refereeIdStr, livesWagered] of Object.entries(losingUserWagers)) {
+      const refereeId = Number(refereeIdStr);
+      const [referee] = await db
+        .select({ referredBy: users.referredBy })
+        .from(users)
+        .where(eq(users.id, refereeId));
+      if (!referee?.referredBy) continue;
+
+      const [master] = await db
+        .select({ id: users.id, isMaster: users.isMaster, isActive: users.isActive })
+        .from(users)
+        .where(eq(users.id, referee.referredBy));
+      if (!master?.isMaster || !master.isActive) continue;
+
+      const commissionLives = livesWagered * MASTER_COMMISSION_RATE;
+      const usdtEarned = commissionLives * livesToUsdtRate;
+      if (usdtEarned <= 0) continue;
+
+      const [earning] = await db.insert(masterReferralEarnings).values({
+        masterId: master.id,
+        refereeId,
+        pollId,
+        livesWagered: livesWagered.toFixed(6),
+        commissionLives: commissionLives.toFixed(6),
+        livesToUsdtRate: livesToUsdtRate.toFixed(4),
+        usdtEarned: usdtEarned.toFixed(2),
+      }).onConflictDoNothing().returning({ id: masterReferralEarnings.id });
+      if (!earning) continue;
+
+      await db
+        .update(users)
+        .set({ usdtBalance: sql`usdt_balance + ${usdtEarned.toFixed(2)}` })
+        .where(eq(users.id, master.id));
+
+      await db.insert(notifications).values({
+        userId: master.id,
+        type: "payout_credited",
+        title: "Komisi master referral masuk",
+        body: `Kamu mendapat ${usdtEarned.toFixed(2)} USDT dari losing bet referral user #${refereeId} di poll #${pollId}.`,
+        refId: pollId,
+        refType: "master_referral",
+      });
+
+      broadcastEvent("master_referral:commission", {
+        pollId,
+        refereeId,
+        livesWagered,
+        commissionLives,
+        usdtEarned,
+      }, `user:${master.id}`);
+
+      masterCommissions.push({
+        masterId: master.id,
+        refereeId,
+        livesWagered,
+        commissionLives,
+        usdtEarned,
+      });
+    }
+
     // Update poll status
     await db.update(polls)
       .set({ status: "resolved", winnerOptionIndex, resolvedAt: new Date(), resolvedBy: Number(me.sub) })
@@ -520,7 +607,7 @@ export const pollsController = {
         action: "resolve_poll",
         targetResourceId: pollId,
         targetResourceType: "poll",
-        metadata: { winnerOptionIndex, totalWinnersWagered, totalLosersWagered },
+        metadata: { winnerOptionIndex, totalWinnersWagered, totalLosersWagered, masterCommissions },
         ipAddress: requestIp(c),
       });
     }
