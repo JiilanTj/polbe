@@ -239,15 +239,15 @@ export const referralEarnings = pgTable("referral_earnings", {
 export const masterReferralEarnings = pgTable("master_referral_earnings", {
   id: serial("id").primaryKey(),
   masterId: integer("master_id").references(() => users.id).notNull(),
-  refereeId: integer("referee_id").references(() => users.id).notNull(),
   pollId: integer("poll_id").references(() => polls.id).notNull(),
-  livesWagered: decimal("lives_wagered", { precision: 18, scale: 6 }).notNull(),
+  eligibleRefereeIds: integer("eligible_referee_ids").array().notNull(),
+  losingLivesPool: decimal("losing_lives_pool", { precision: 18, scale: 6 }).notNull(),
   commissionLives: decimal("commission_lives", { precision: 18, scale: 6 }).notNull(),
   livesToUsdtRate: decimal("lives_to_usdt_rate", { precision: 10, scale: 4 }).notNull(),
   usdtEarned: decimal("usdt_earned", { precision: 10, scale: 2 }).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
-  uniqueMasterRefereePoll: uniqueIndex("master_referral_master_referee_poll").on(t.masterId, t.refereeId, t.pollId),
+  uniqueMasterPoll: uniqueIndex("master_referral_master_poll").on(t.masterId, t.pollId),
 }));
 
 // ─── CLOB: Orders ─────────────────────────────────────────────────────────

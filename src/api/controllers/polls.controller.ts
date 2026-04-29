@@ -521,22 +521,24 @@ export const pollsController = {
       }
     }
 
-    const losingUserWagers: Record<number, number> = {};
-    losersVotes.forEach((vote) => {
-      losingUserWagers[vote.userId] = (losingUserWagers[vote.userId] || 0) + Number(vote.livesWagered);
+    const participantWagers: Record<number, number> = {};
+    allVotes.forEach((vote) => {
+      participantWagers[vote.userId] = (participantWagers[vote.userId] || 0) + Number(vote.livesWagered);
     });
 
     const [settings] = await db.select({ livesToUsdtRate: platformSettings.livesToUsdtRate }).from(platformSettings).limit(1);
     const livesToUsdtRate = Number(settings?.livesToUsdtRate ?? 1);
+    const masterCommissionPoolLives = totalLosersWagered * MASTER_COMMISSION_RATE;
+    const eligibleMasters = new Map<number, { refereeIds: Set<number>; weight: number }>();
     const masterCommissions: Array<{
       masterId: number;
-      refereeId: number;
-      livesWagered: number;
+      eligibleRefereeIds: number[];
+      losingLivesPool: number;
       commissionLives: number;
       usdtEarned: number;
     }> = [];
 
-    for (const [refereeIdStr, livesWagered] of Object.entries(losingUserWagers)) {
+    for (const [refereeIdStr, livesWagered] of Object.entries(participantWagers)) {
       const refereeId = Number(refereeIdStr);
       const [referee] = await db
         .select({ referredBy: users.referredBy })
@@ -545,20 +547,32 @@ export const pollsController = {
       if (!referee?.referredBy) continue;
 
       const [master] = await db
-        .select({ id: users.id, isMaster: users.isMaster, isActive: users.isActive })
+        .select({ id: users.id, role: users.role, isMaster: users.isMaster, isActive: users.isActive })
         .from(users)
         .where(eq(users.id, referee.referredBy));
-      if (!master?.isMaster || !master.isActive) continue;
+      if (!master?.isMaster || !master.isActive || master.role !== "user") continue;
 
-      const commissionLives = livesWagered * MASTER_COMMISSION_RATE;
+      const existing = eligibleMasters.get(master.id) ?? { refereeIds: new Set<number>(), weight: 0 };
+      existing.refereeIds.add(refereeId);
+      existing.weight += livesWagered;
+      eligibleMasters.set(master.id, existing);
+    }
+
+    const totalEligibleWeight = [...eligibleMasters.values()].reduce((sum, item) => sum + item.weight, 0);
+
+    for (const [masterId, eligibility] of eligibleMasters.entries()) {
+      if (masterCommissionPoolLives <= 0 || totalEligibleWeight <= 0) continue;
+
+      const commissionLives = masterCommissionPoolLives * (eligibility.weight / totalEligibleWeight);
       const usdtEarned = commissionLives * livesToUsdtRate;
       if (usdtEarned <= 0) continue;
+      const eligibleRefereeIds = [...eligibility.refereeIds];
 
       const [earning] = await db.insert(masterReferralEarnings).values({
-        masterId: master.id,
-        refereeId,
+        masterId,
         pollId,
-        livesWagered: livesWagered.toFixed(6),
+        eligibleRefereeIds,
+        losingLivesPool: totalLosersWagered.toFixed(6),
         commissionLives: commissionLives.toFixed(6),
         livesToUsdtRate: livesToUsdtRate.toFixed(4),
         usdtEarned: usdtEarned.toFixed(2),
@@ -568,29 +582,29 @@ export const pollsController = {
       await db
         .update(users)
         .set({ usdtBalance: sql`usdt_balance + ${usdtEarned.toFixed(2)}` })
-        .where(eq(users.id, master.id));
+        .where(eq(users.id, masterId));
 
       await db.insert(notifications).values({
-        userId: master.id,
+        userId: masterId,
         type: "payout_credited",
         title: "Komisi master referral masuk",
-        body: `Kamu mendapat ${usdtEarned.toFixed(2)} USDT dari losing bet referral user #${refereeId} di poll #${pollId}.`,
+        body: `Kamu mendapat ${usdtEarned.toFixed(2)} USDT dari komisi master referral poll #${pollId}.`,
         refId: pollId,
         refType: "master_referral",
       });
 
       broadcastEvent("master_referral:commission", {
         pollId,
-        refereeId,
-        livesWagered,
+        eligibleRefereeIds,
+        losingLivesPool: totalLosersWagered,
         commissionLives,
         usdtEarned,
-      }, `user:${master.id}`);
+      }, `user:${masterId}`);
 
       masterCommissions.push({
-        masterId: master.id,
-        refereeId,
-        livesWagered,
+        masterId,
+        eligibleRefereeIds,
+        losingLivesPool: totalLosersWagered,
         commissionLives,
         usdtEarned,
       });
