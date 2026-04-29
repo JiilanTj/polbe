@@ -4,7 +4,7 @@ import { users, livesTransactions, topupRequests, withdrawalRequests, polls, ord
 import { eq, desc, ilike, sql, or, and } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { parseBody, safeInt } from "../../lib/validate";
-import { adminCreditSchema, adminMasterSchema, adminRoleSchema } from "../../lib/schemas";
+import { adminCreateUserSchema, adminCreditSchema, adminMasterSchema, adminRoleSchema } from "../../lib/schemas";
 
 type TopupPaymentMethod = {
   network: string;
@@ -33,6 +33,24 @@ function normalizeTopupPaymentMethods(input: unknown): TopupPaymentMethod[] {
   }
 
   return methods;
+}
+
+function randomReferralCode(): string {
+  return Math.random().toString(36).substring(2, 6).toUpperCase() +
+    Math.random().toString(36).substring(2, 6).toUpperCase();
+}
+
+async function generateUniqueReferralCode() {
+  let referralCode = randomReferralCode();
+  for (let retries = 0; retries < 5; retries++) {
+    const [collision] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.referralCode, referralCode));
+    if (!collision) return referralCode;
+    referralCode = randomReferralCode();
+  }
+  return `${Date.now().toString(36).toUpperCase().slice(-8)}`;
 }
 
 export const adminController = {
@@ -112,6 +130,73 @@ export const adminController = {
       data: rows,
       pagination: { page, limit, total: Number(total), totalPages: Math.ceil(Number(total) / limit) },
     });
+  },
+
+  // POST /api/admin/users — admin buat user baru
+  async createUser(c: Context) {
+    const me = c.get("user") as TokenPayload;
+    const body = await parseBody(c, adminCreateUserSchema);
+    if (body instanceof Response) return body;
+
+    const email = body.email.toLowerCase();
+    const username = body.username.trim();
+
+    const [existingEmail] = await db.select({ id: users.id }).from(users).where(eq(users.email, email));
+    if (existingEmail) return c.json({ error: "Email sudah terdaftar" }, 409);
+
+    const [existingUsername] = await db.select({ id: users.id }).from(users).where(eq(users.username, username));
+    if (existingUsername) return c.json({ error: "Username sudah dipakai" }, 409);
+
+    const passwordHash = await Bun.password.hash(body.password, { algorithm: "bcrypt", cost: 12 });
+    const referralCode = await generateUniqueReferralCode();
+    const recoveryAt = new Date(Date.now() + 6 * 60 * 60 * 1000);
+
+    const [user] = await db
+      .insert(users)
+      .values({
+        email,
+        username,
+        passwordHash,
+        role: body.role,
+        isMaster: body.role === "user" ? body.isMaster : false,
+        isActive: true,
+        livesBalance: String(body.initialLives),
+        livesRecoveryAt: recoveryAt,
+        referralCode,
+        emailVerifiedAt: new Date(),
+      })
+      .returning({
+        id: users.id,
+        email: users.email,
+        username: users.username,
+        role: users.role,
+        isMaster: users.isMaster,
+        isActive: users.isActive,
+        livesBalance: users.livesBalance,
+        livesRecoveryAt: users.livesRecoveryAt,
+        referralCode: users.referralCode,
+        referredBy: users.referredBy,
+        createdAt: users.createdAt,
+        updatedAt: users.updatedAt,
+      });
+
+    if (!user) return c.json({ error: "Gagal membuat user" }, 500);
+
+    await db.insert(adminAuditLogs).values({
+      adminId: Number(me.sub),
+      action: "create_user",
+      targetUserId: user.id,
+      metadata: {
+        email: user.email,
+        username: user.username,
+        role: user.role,
+        isMaster: user.isMaster,
+        initialLives: body.initialLives,
+      },
+      ipAddress: c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? null,
+    });
+
+    return c.json({ message: `User @${user.username} berhasil dibuat`, data: user }, 201);
   },
 
   // GET /api/admin/users/:id — detail user

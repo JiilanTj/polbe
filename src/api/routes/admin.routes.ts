@@ -9,6 +9,7 @@ adminRoutes.use("/*", authMiddleware, requireRole("admin"), defaultRateLimit);
 
 adminRoutes.get("/stats", adminController.stats);
 adminRoutes.get("/users", adminController.listUsers);
+adminRoutes.post("/users", adminMutationRateLimit, adminController.createUser);
 adminRoutes.get("/users/:id", adminController.getUser);
 adminRoutes.patch("/users/:id/toggle", adminMutationRateLimit, adminController.toggleUser);
 adminRoutes.patch("/users/:id/role", adminMutationRateLimit, adminController.changeRole);

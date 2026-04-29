@@ -106,6 +106,22 @@ export const adminCreditSchema = z.object({
   note: z.string().max(500).optional(),
 });
 
+export const adminCreateUserSchema = z.object({
+  email: z.string().email("Format email tidak valid"),
+  username: z
+    .string()
+    .min(3, "Username minimal 3 karakter")
+    .max(50, "Username maksimal 50 karakter")
+    .regex(/^[a-zA-Z0-9_]+$/, "Username hanya boleh huruf, angka, dan underscore"),
+  password: z.string().min(8, "Password minimal 8 karakter"),
+  role: z.enum(["user", "admin"]).default("user"),
+  isMaster: z.boolean().default(false),
+  initialLives: z.number().int().min(0).max(1_000_000).default(5),
+}).refine((data) => data.role === "user" || !data.isMaster, {
+  message: "Status master hanya bisa diberikan ke akun role user",
+  path: ["isMaster"],
+});
+
 export const adminRoleSchema = z.object({
   role: z.enum(["user", "admin", "platform"]),
 });
