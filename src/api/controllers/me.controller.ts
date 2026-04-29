@@ -12,7 +12,7 @@ import {
   watchlist,
   notifications,
 } from "../../db/schema";
-import { eq, desc, sql, and } from "drizzle-orm";
+import { eq, desc, sql, and, inArray } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { parseBody } from "../../lib/validate";
 import { updateProfileSchema } from "../../lib/schemas";
@@ -182,6 +182,7 @@ export const meController = {
       .select({
         id: users.id,
         username: users.username,
+        isActive: users.isActive,
         createdAt: users.createdAt,
       })
       .from(users)
@@ -189,6 +190,16 @@ export const meController = {
       .orderBy(desc(users.createdAt))
       .limit(limit)
       .offset(offset);
+
+    const allDownlines = await db
+      .select({
+        id: users.id,
+        username: users.username,
+        isActive: users.isActive,
+        createdAt: users.createdAt,
+      })
+      .from(users)
+      .where(eq(users.referredBy, Number(me.sub)));
 
     // Riwayat komisi poll referral yang sudah earned.
     const earnings = await db
@@ -204,17 +215,95 @@ export const meController = {
       })
       .from(masterReferralEarnings)
       .where(eq(masterReferralEarnings.masterId, Number(me.sub)))
-      .orderBy(desc(masterReferralEarnings.createdAt))
-      .limit(10);
+      .orderBy(desc(masterReferralEarnings.createdAt));
+
+    const generatedUsdtByReferee = new Map<number, number>();
+    const commissionEventsByReferee = new Map<number, number>();
+
+    for (const earning of earnings) {
+      const eligibleRefereeIds = (earning.eligibleRefereeIds || []).filter(
+        (id): id is number => Number.isFinite(id),
+      );
+      if (!eligibleRefereeIds.length) continue;
+
+      const usdtEarned = Number(earning.usdtEarned ?? 0);
+      const voteWeights = await db
+        .select({
+          userId: pollVotes.userId,
+          livesWagered: sql<string>`COALESCE(SUM(${pollVotes.livesWagered}), 0)`,
+        })
+        .from(pollVotes)
+        .where(
+          and(
+            eq(pollVotes.pollId, earning.pollId),
+            inArray(pollVotes.userId, eligibleRefereeIds),
+          ),
+        )
+        .groupBy(pollVotes.userId);
+
+      const weightByUser = new Map<number, number>();
+      let totalWeight = 0;
+      for (const voteWeight of voteWeights) {
+        const weight = Number(voteWeight.livesWagered ?? 0);
+        if (weight <= 0) continue;
+        weightByUser.set(voteWeight.userId, weight);
+        totalWeight += weight;
+      }
+
+      for (const refereeId of eligibleRefereeIds) {
+        const share = totalWeight > 0
+          ? (weightByUser.get(refereeId) ?? 0) / totalWeight
+          : 1 / eligibleRefereeIds.length;
+        const generatedUsdt = usdtEarned * share;
+        generatedUsdtByReferee.set(
+          refereeId,
+          (generatedUsdtByReferee.get(refereeId) ?? 0) + generatedUsdt,
+        );
+        commissionEventsByReferee.set(
+          refereeId,
+          (commissionEventsByReferee.get(refereeId) ?? 0) + 1,
+        );
+      }
+    }
+
+    const ranking = allDownlines
+      .map((downline) => ({
+        ...downline,
+        generatedUsdt: Number((generatedUsdtByReferee.get(downline.id) ?? 0).toFixed(2)),
+        commissionEvents: commissionEventsByReferee.get(downline.id) ?? 0,
+      }))
+      .sort((a, b) => b.generatedUsdt - a.generatedUsdt);
+
+    const rankingById = new Map(ranking.map((item) => [item.id, item]));
+    const downlinesWithStats = downlines.map((downline) => ({
+      ...downline,
+      generatedUsdt: rankingById.get(downline.id)?.generatedUsdt ?? 0,
+      commissionEvents: rankingById.get(downline.id)?.commissionEvents ?? 0,
+    }));
 
     const downlineCountResult = await db
       .select({ total: sql<number>`count(*)` })
       .from(users)
       .where(eq(users.referredBy, Number(me.sub)));
     const total = downlineCountResult[0]?.total ?? 0;
+    const totalUsdtEarned = earnings.reduce(
+      (sum, earning) => sum + Number(earning.usdtEarned ?? 0),
+      0,
+    );
+    const activeDownlineCount = allDownlines.filter((downline) => downline.isActive).length;
 
     return c.json({
-      data: { downlines, recentEarnings: earnings },
+      data: {
+        downlines: downlinesWithStats,
+        recentEarnings: earnings.slice(0, 10),
+        ranking,
+        stats: {
+          downlineCount: Number(total),
+          activeDownlineCount,
+          totalUsdtEarned: Number(totalUsdtEarned.toFixed(2)),
+          totalCommissionEvents: earnings.length,
+        },
+      },
       pagination: {
         page,
         limit,
