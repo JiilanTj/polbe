@@ -24,6 +24,8 @@ function requestIp(c: Context) {
   return c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? null;
 }
 
+const WINNER_PRIZE_RATE = 0.7;
+const SYSTEM_PRIZE_RATE = 0.3;
 const MASTER_COMMISSION_RATE = 0.03;
 
 // ─── Helper: kredit/debit nyawa + catat transaksi ──────────────────────────
@@ -482,6 +484,10 @@ export const pollsController = {
       return c.json({ error: "Anda tidak memiliki akses untuk me-resolve poll ini" }, 403);
     }
 
+    if (winnerOptionIndex < 0 || winnerOptionIndex >= (poll.options?.length ?? 0)) {
+      return c.json({ error: "Opsi pemenang tidak valid" }, 422);
+    }
+
     // Ambil semua suara
     const allVotes = await db.select().from(pollVotes).where(eq(pollVotes.pollId, pollId));
     const winnersVotes = allVotes.filter(v => v.optionIndex === winnerOptionIndex);
@@ -489,24 +495,52 @@ export const pollsController = {
 
     const totalWinnersWagered = winnersVotes.reduce((sum, v) => sum + Number(v.livesWagered), 0);
     const totalLosersWagered = losersVotes.reduce((sum, v) => sum + Number(v.livesWagered), 0);
+    const prizeForWinner = totalLosersWagered * WINNER_PRIZE_RATE;
+    const prizeForSystem = totalLosersWagered * SYSTEM_PRIZE_RATE;
 
-    // ─── Payout Logic: 70% dr yg kalah di bagi jumlah yg bener ──────────────
-    if (totalWinnersWagered > 0) {
-      const prizePool = totalLosersWagered * 0.7;
-      const bonusPerLife = prizePool / totalWinnersWagered;
+    // ─── Payout Logic ────────────────────────────────────────────
+    // 70% dari losing pool dibagi rata per user pemenang.
+    // Modal winning bet tiap pemenang tetap dikembalikan.
+    const winnerWagersByUser: Record<number, number> = {};
+    winnersVotes.forEach((vote) => {
+      winnerWagersByUser[vote.userId] = (winnerWagersByUser[vote.userId] || 0) + Number(vote.livesWagered);
+    });
+    const winnerUserIds = Object.keys(winnerWagersByUser).map(Number);
+    const bonusPerWinningUser = winnerUserIds.length > 0 ? prizeForWinner / winnerUserIds.length : 0;
 
-      // Group winners by user (jika user vote berkali-kali)
+    if (winnerUserIds.length > 0) {
       const userPayouts: Record<number, number> = {};
-      winnersVotes.forEach(v => {
-        const livesWageredNum = Number(v.livesWagered);
-        const bonus = livesWageredNum * bonusPerLife;
-        const payout = livesWageredNum + bonus;
-        userPayouts[v.userId] = (userPayouts[v.userId] || 0) + payout;
-      });
+      for (const userId of winnerUserIds) {
+        userPayouts[userId] = (winnerWagersByUser[userId] ?? 0) + bonusPerWinningUser;
+      }
+
+      for (const vote of winnersVotes) {
+        const userWinningWager = winnerWagersByUser[vote.userId] || 0;
+        const voteShare = userWinningWager > 0 ? Number(vote.livesWagered) / userWinningWager : 0;
+        const votePayout = Number(vote.livesWagered) + (bonusPerWinningUser * voteShare);
+        await db
+          .update(pollVotes)
+          .set({ payoutLives: votePayout.toFixed(6) })
+          .where(eq(pollVotes.id, vote.id));
+      }
+
+      for (const vote of losersVotes) {
+        await db
+          .update(pollVotes)
+          .set({ payoutLives: "0" })
+          .where(eq(pollVotes.id, vote.id));
+      }
 
       for (const [userIdStr, amount] of Object.entries(userPayouts)) {
         const userId = Number(userIdStr);
-        await adjustLives(userId, amount, "vote_payout", pollId, "poll", `Menang poll #${pollId} - Payout: ${amount} nyawa`);
+        await adjustLives(
+          userId,
+          amount,
+          "vote_payout",
+          pollId,
+          "poll",
+          `Menang poll #${pollId} - Refund ${winnerWagersByUser[userId]} nyawa + bonus ${bonusPerWinningUser} nyawa`,
+        );
 
         await db.insert(notifications).values({
           userId,
@@ -519,17 +553,27 @@ export const pollsController = {
 
         broadcastEvent("poll:payout", { pollId, payout: amount }, `user:${userId}`);
       }
+    } else {
+      for (const vote of losersVotes) {
+        await db
+          .update(pollVotes)
+          .set({ payoutLives: "0" })
+          .where(eq(pollVotes.id, vote.id));
+      }
     }
 
-    const participantWagers: Record<number, number> = {};
-    allVotes.forEach((vote) => {
-      participantWagers[vote.userId] = (participantWagers[vote.userId] || 0) + Number(vote.livesWagered);
+    const losingWagersByUser: Record<number, number> = {};
+    losersVotes.forEach((vote) => {
+      losingWagersByUser[vote.userId] = (losingWagersByUser[vote.userId] || 0) + Number(vote.livesWagered);
     });
 
     const [settings] = await db.select({ livesToUsdtRate: platformSettings.livesToUsdtRate }).from(platformSettings).limit(1);
     const livesToUsdtRate = Number(settings?.livesToUsdtRate ?? 1);
-    const masterCommissionPoolLives = totalLosersWagered * MASTER_COMMISSION_RATE;
-    const eligibleMasters = new Map<number, { refereeIds: Set<number>; weight: number }>();
+    const masterCommissionsByMaster = new Map<number, {
+      eligibleRefereeIds: Set<number>;
+      losingLivesPool: number;
+      commissionLives: number;
+    }>();
     const masterCommissions: Array<{
       masterId: number;
       eligibleRefereeIds: number[];
@@ -538,7 +582,7 @@ export const pollsController = {
       usdtEarned: number;
     }> = [];
 
-    for (const [refereeIdStr, livesWagered] of Object.entries(participantWagers)) {
+    for (const [refereeIdStr, losingLives] of Object.entries(losingWagersByUser)) {
       const refereeId = Number(refereeIdStr);
       const [referee] = await db
         .select({ referredBy: users.referredBy })
@@ -552,27 +596,28 @@ export const pollsController = {
         .where(eq(users.id, referee.referredBy));
       if (!master?.isMaster || !master.isActive || master.role !== "user") continue;
 
-      const existing = eligibleMasters.get(master.id) ?? { refereeIds: new Set<number>(), weight: 0 };
-      existing.refereeIds.add(refereeId);
-      existing.weight += livesWagered;
-      eligibleMasters.set(master.id, existing);
+      const existing = masterCommissionsByMaster.get(master.id) ?? ({
+        eligibleRefereeIds: new Set<number>(),
+        losingLivesPool: 0,
+        commissionLives: 0,
+      });
+      existing.eligibleRefereeIds.add(refereeId);
+      existing.losingLivesPool += losingLives;
+      existing.commissionLives += losingLives * MASTER_COMMISSION_RATE;
+      masterCommissionsByMaster.set(master.id, existing);
     }
 
-    const totalEligibleWeight = [...eligibleMasters.values()].reduce((sum, item) => sum + item.weight, 0);
-
-    for (const [masterId, eligibility] of eligibleMasters.entries()) {
-      if (masterCommissionPoolLives <= 0 || totalEligibleWeight <= 0) continue;
-
-      const commissionLives = masterCommissionPoolLives * (eligibility.weight / totalEligibleWeight);
+    for (const [masterId, commission] of masterCommissionsByMaster.entries()) {
+      const commissionLives = commission.commissionLives;
       const usdtEarned = commissionLives * livesToUsdtRate;
       if (usdtEarned <= 0) continue;
-      const eligibleRefereeIds = [...eligibility.refereeIds];
+      const eligibleRefereeIds = [...commission.eligibleRefereeIds];
 
       const [earning] = await db.insert(masterReferralEarnings).values({
         masterId,
         pollId,
         eligibleRefereeIds,
-        losingLivesPool: totalLosersWagered.toFixed(6),
+        losingLivesPool: commission.losingLivesPool.toFixed(6),
         commissionLives: commissionLives.toFixed(6),
         livesToUsdtRate: livesToUsdtRate.toFixed(4),
         usdtEarned: usdtEarned.toFixed(2),
@@ -596,7 +641,7 @@ export const pollsController = {
       broadcastEvent("master_referral:commission", {
         pollId,
         eligibleRefereeIds,
-        losingLivesPool: totalLosersWagered,
+        losingLivesPool: commission.losingLivesPool,
         commissionLives,
         usdtEarned,
       }, `user:${masterId}`);
@@ -604,7 +649,7 @@ export const pollsController = {
       masterCommissions.push({
         masterId,
         eligibleRefereeIds,
-        losingLivesPool: totalLosersWagered,
+        losingLivesPool: commission.losingLivesPool,
         commissionLives,
         usdtEarned,
       });
@@ -621,7 +666,15 @@ export const pollsController = {
         action: "resolve_poll",
         targetResourceId: pollId,
         targetResourceType: "poll",
-        metadata: { winnerOptionIndex, totalWinnersWagered, totalLosersWagered, masterCommissions },
+        metadata: {
+          winnerOptionIndex,
+          totalWinnersWagered,
+          totalLosersWagered,
+          prizeForWinner,
+          prizeForSystem,
+          bonusPerWinningUser,
+          masterCommissions,
+        },
         ipAddress: requestIp(c),
       });
     }

@@ -1,90 +1,87 @@
 import { describe, expect, it } from "bun:test";
 
 /**
- * Simulasi Logika Payout 70/30 sesuai request klien:
- * "70% dr yg kalah di bagi jumlah yg bener"
+ * Simulasi Logika Payout 70/30:
+ * - 70% losing pool menjadi prize for winner, dibagi rata per user pemenang.
+ * - Winning bet/modal pemenang dikembalikan.
+ * - 30% losing pool menjadi prize for admin/system.
+ * - Jika loser adalah downline master, 3% dari losing wager masuk ke master.
  */
-function calculatePayout(wageredAmount: number, totalWinnersWagered: number, totalLosersWagered: number) {
-  if (totalWinnersWagered <= 0) {
-    return { bonus: 0, totalPayout: wageredAmount, roiPercent: 0 };
-  }
-  
-  const prizePool = totalLosersWagered * 0.7; // 70% dr yg kalah
-  const bonusPerLife = prizePool / totalWinnersWagered;
-  
-  const bonus = wageredAmount * bonusPerLife;
-  const totalPayout = wageredAmount + bonus;
-  
+function calculatePayout(winningWageredAmount: number, winnerCount: number, totalLosersWagered: number) {
+  const prizeForWinner = totalLosersWagered * 0.7;
+  const prizeForSystem = totalLosersWagered * 0.3;
+  const bonus = winnerCount > 0 ? prizeForWinner / winnerCount : 0;
+  const totalPayout = winningWageredAmount + bonus;
+
   return {
+    prizeForWinner,
+    prizeForSystem,
     bonus,
     totalPayout,
-    roiPercent: wageredAmount > 0 ? (bonus / wageredAmount) * 100 : 0
+    roiPercent: winningWageredAmount > 0 ? (bonus / winningWageredAmount) * 100 : 0
+  };
+}
+
+function calculateMasterCommission(losingWageredAmount: number, livesToUsdtRate = 1) {
+  const masterCommissionLives = losingWageredAmount * 0.03;
+  const remainingSystemPrizeLives = losingWageredAmount * 0.27;
+  return {
+    masterCommissionLives,
+    remainingSystemPrizeLives,
+    masterCommissionUsdt: masterCommissionLives * livesToUsdtRate,
   };
 }
 
 describe("Polymarket 70/30 Payout Logic", () => {
   
-  it("Harus sesuai contoh klien: A=80 (Menang), B=20 (Kalah)", () => {
-    const wagered = 1; // User pasang 1 nyawa di A
-    const winnersTotal = 80;
-    const losersTotal = 20;
+  it("membagi 70% losing pool rata per user pemenang dan mengembalikan modal", () => {
+    const result = calculatePayout(10, 2, 100);
 
-    const result = calculatePayout(wagered, winnersTotal, losersTotal);
-
-    // Hitungan: (20 * 0.7) / 80 = 0.175
-    // Total: 1 + 0.175 = 1.175
-    expect(result.bonus).toBe(0.175);
-    expect(result.totalPayout).toBe(1.175);
-    expect(result.roiPercent).toBe(17.5);
-    
-    console.log(`\n[Test 1] Pasang ${wagered} Nyawa. Bonus: ${result.bonus}, Total: ${result.totalPayout} (ROI: ${result.roiPercent}%)`);
+    expect(result.prizeForWinner).toBe(70);
+    expect(result.prizeForSystem).toBe(30);
+    expect(result.bonus).toBe(35);
+    expect(result.totalPayout).toBe(45);
+    expect(result.roiPercent).toBe(350);
   });
 
-  it("Harus sesuai contoh klien: 10 org A (Menang), 5 org B (Kalah) - Masing-masing 1 nyawa", () => {
-    const wagered = 1;
-    const winnersTotal = 10; // 10 orang x 1 nyawa
-    const losersTotal = 5;   // 5 orang x 1 nyawa
+  it("winner dengan modal lebih besar tetap hanya mendapat bonus rata per user", () => {
+    const smallWinner = calculatePayout(10, 2, 100);
+    const bigWinner = calculatePayout(50, 2, 100);
 
-    const result = calculatePayout(wagered, winnersTotal, losersTotal);
-
-    // Hitungan: (5 * 0.7) / 10 = 3.5 / 10 = 0.35
-    // Total: 1 + 0.35 = 1.35
-    expect(result.bonus).toBe(0.35);
-    expect(result.totalPayout).toBe(1.35);
-    expect(result.roiPercent).toBe(35);
-
-    console.log(`[Test 2] Pasang ${wagered} Nyawa. Bonus: ${result.bonus}, Total: ${result.totalPayout} (ROI: ${result.roiPercent}%)`);
+    expect(smallWinner.bonus).toBe(35);
+    expect(smallWinner.totalPayout).toBe(45);
+    expect(bigWinner.bonus).toBe(35);
+    expect(bigWinner.totalPayout).toBe(85);
   });
 
-  it("Simulasi: 50 org A (Menang), 100 org B (Kalah) - Masing-masing 1 nyawa (0.7 USDT/orang)", () => {
-    const wagered = 1;
-    const winnersTotal = 50;
-    const losersTotal = 100;
+  it("membagi prize for winner dari semua loser", () => {
+    const result = calculatePayout(1, 50, 100);
 
-    const result = calculatePayout(wagered, winnersTotal, losersTotal);
-
-    // Hitungan: (100 * 0.7) / 50 = 70 / 50 = 1.4 bonus
-    // Modal 1 + Bonus 1.4 = 2.4 Payout total (Value nyawa jadi 2.4 USDT)
-    // Tapi klien bilang "Jadi= 0.35 x 100 / 50 = 0.7 usdt/org"
-    // Note: 0.35 itu adalah 0.5 * 0.7. Sepertinya klien berasumsi modal ditarik dulu? 
-    // Mari kita cek angka 0.7 usdt/org itu adalah murni BONUSnya saja.
-    
-    expect(result.bonus).toBe(1.4); 
-    // Wait, kalau klien bilang 0.7, mungkin dia ngitungnya 70% itu dari POTENSI (0.5 per side)? 
-    // Tapi di chat: "Berarti nilai nyawa 5 org x 70% dibagi 10 org"
-    // Mari kita ikuti rumus yang paling konsisten di chat.
-    
-    console.log(`[Test 3] Pasang ${wagered} Nyawa. Bonus: ${result.bonus}, Total: ${result.totalPayout} (ROI: ${result.roiPercent}%)`);
+    expect(result.prizeForWinner).toBe(70);
+    expect(result.bonus).toBe(1.4);
+    expect(result.totalPayout).toBe(2.4);
   });
 
-  it("Harus menangani kasus kalau semua orang benar (Tidak ada yang kalah)", () => {
-    const wagered = 10;
-    const winnersTotal = 100;
-    const losersTotal = 0;
-
-    const result = calculatePayout(wagered, winnersTotal, losersTotal);
+  it("hanya refund modal kalau tidak ada loser", () => {
+    const result = calculatePayout(10, 5, 0);
 
     expect(result.bonus).toBe(0);
-    expect(result.totalPayout).toBe(10); // Refund modal saja
+    expect(result.totalPayout).toBe(10);
+  });
+
+  it("menghitung komisi master dari losing wager downline milik master", () => {
+    const result = calculateMasterCommission(100, 1);
+
+    expect(result.masterCommissionLives).toBe(3);
+    expect(result.masterCommissionUsdt).toBe(3);
+    expect(result.remainingSystemPrizeLives).toBe(27);
+  });
+
+  it("mengonversi komisi master ke USDT dengan platform rate", () => {
+    const result = calculateMasterCommission(150, 0.5);
+
+    expect(result.masterCommissionLives).toBe(4.5);
+    expect(result.masterCommissionUsdt).toBe(2.25);
+    expect(result.remainingSystemPrizeLives).toBe(40.5);
   });
 });

@@ -235,7 +235,7 @@ export const referralEarnings = pgTable("referral_earnings", {
 });
 
 // ─── Master Referral Earnings ───────────────────────────────────────────────
-// Komisi 3% dari bet lives downline master saat poll resolve, dikonversi ke USDT
+// Komisi 3% dari losing bet lives downline master saat poll resolve, dikonversi ke USDT
 export const masterReferralEarnings = pgTable("master_referral_earnings", {
   id: serial("id").primaryKey(),
   masterId: integer("master_id").references(() => users.id).notNull(),
