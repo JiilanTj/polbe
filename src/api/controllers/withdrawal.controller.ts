@@ -48,6 +48,18 @@ export const withdrawalController = {
       return c.json({ error: "Network withdrawal tidak valid" }, 422);
     }
 
+    const [actor] = await db
+      .select({ isMaster: users.isMaster })
+      .from(users)
+      .where(eq(users.id, userId));
+    if (!actor) return c.json({ error: "User tidak ditemukan" }, 404);
+    if (actor.isMaster && livesDebit > 0) {
+      return c.json({
+        error: "User master hanya boleh withdrawal menggunakan saldo USDT. Lives tidak boleh digunakan.",
+        code: "MASTER_LIVES_WITHDRAWAL_BLOCKED",
+      }, 403);
+    }
+
     // ── Rate limit: maks 3 withdrawal per hari ─────────────────────────────
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);

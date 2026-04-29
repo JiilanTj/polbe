@@ -29,6 +29,17 @@ export const ordersController = {
     if (price <= 0 || price >= 1) return c.json({ error: "Price harus antara 0 dan 1 (eksklusif)" }, 422);
 
     const userId = Number(me.sub);
+    const [actor] = await db
+      .select({ isMaster: users.isMaster })
+      .from(users)
+      .where(eq(users.id, userId));
+    if (!actor) return c.json({ error: "User tidak ditemukan" }, 404);
+    if (actor.isMaster) {
+      return c.json({
+        error: "User master tidak boleh melakukan bet di poll.",
+        code: "MASTER_BET_BLOCKED",
+      }, 403);
+    }
 
     if (side === "buy") {
       // ── BUY: atomic — cek saldo, potong lives, insert order ──────────────

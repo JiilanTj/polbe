@@ -86,6 +86,18 @@ export const topupController = {
 
     const { packageId, proofImageUrl, paymentNetwork } = body;
 
+    const [actor] = await db
+      .select({ isMaster: users.isMaster })
+      .from(users)
+      .where(eq(users.id, Number(me.sub)));
+    if (!actor) return c.json({ error: "User tidak ditemukan" }, 404);
+    if (actor.isMaster) {
+      return c.json({
+        error: "User master tidak boleh melakukan topup.",
+        code: "MASTER_TOPUP_BLOCKED",
+      }, 403);
+    }
+
     // Ambil paket
     const [pkg] = await db
       .select()

@@ -366,9 +366,19 @@ export const pollsController = {
       return c.json({ error: "Opsi tidak valid" }, 422);
     }
 
-    // Cek saldo
-    const [userData] = await db.select({ livesBalance: users.livesBalance }).from(users).where(eq(users.id, Number(me.sub)));
-    if (!userData || Number(userData.livesBalance) < livesToWager) {
+    // Cek status master + saldo
+    const [userData] = await db
+      .select({ livesBalance: users.livesBalance, isMaster: users.isMaster })
+      .from(users)
+      .where(eq(users.id, Number(me.sub)));
+    if (!userData) return c.json({ error: "User tidak ditemukan" }, 404);
+    if (userData.isMaster) {
+      return c.json({
+        error: "User master tidak boleh melakukan bet di poll.",
+        code: "MASTER_BET_BLOCKED",
+      }, 403);
+    }
+    if (Number(userData.livesBalance) < livesToWager) {
       return c.json({ error: "Nyawa tidak cukup" }, 400);
     }
 

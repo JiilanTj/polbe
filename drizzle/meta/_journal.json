@@ -155,6 +155,13 @@
       "when": 1777209311943,
       "tag": "0021_mean_franklin_richards",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1777460922930,
+      "tag": "0022_bitter_exiles",
+      "breakpoints": true
     }
   ]
 }
