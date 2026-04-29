@@ -3,7 +3,7 @@ import { db } from "../../db";
 import {
   users,
   livesTransactions,
-  referralEarnings,
+  masterReferralEarnings,
   topupRequests,
   withdrawalRequests,
   pollVotes,
@@ -46,21 +46,23 @@ export const meController = {
 
     if (!user) return c.json({ error: "User tidak ditemukan" }, 404);
 
-    // Total referral earnings
-    const [earningsRow] = await db
-      .select({
-        totalUsdtEarned: sql<string>`COALESCE(SUM(usdt_earned), 0)`,
-        totalReferrals: sql<number>`COUNT(DISTINCT referee_id)`,
-      })
-      .from(referralEarnings)
-      .where(eq(referralEarnings.referrerId, Number(me.sub)));
+    const [[downlineStats], [earningsRow]] = await Promise.all([
+      db
+        .select({ totalReferrals: sql<number>`count(*)` })
+        .from(users)
+        .where(eq(users.referredBy, Number(me.sub))),
+      db
+        .select({ totalUsdtEarned: sql<string>`COALESCE(SUM(${masterReferralEarnings.usdtEarned}), 0)` })
+        .from(masterReferralEarnings)
+        .where(eq(masterReferralEarnings.masterId, Number(me.sub))),
+    ]);
 
     return c.json({
       data: {
         ...user,
         avatarUrl: getPublicUrl(user.avatarUrl),
         referralStats: {
-          totalReferrals: Number(earningsRow?.totalReferrals ?? 0),
+          totalReferrals: Number(downlineStats?.totalReferrals ?? 0),
           totalUsdtEarned: earningsRow?.totalUsdtEarned ?? "0",
         },
       },
@@ -188,18 +190,21 @@ export const meController = {
       .limit(limit)
       .offset(offset);
 
-    // Riwayat komisi yang sudah earned
+    // Riwayat komisi poll referral yang sudah earned.
     const earnings = await db
       .select({
-        id: referralEarnings.id,
-        refereeId: referralEarnings.refereeId,
-        topupRequestId: referralEarnings.topupRequestId,
-        usdtEarned: referralEarnings.usdtEarned,
-        createdAt: referralEarnings.createdAt,
+        id: masterReferralEarnings.id,
+        pollId: masterReferralEarnings.pollId,
+        eligibleRefereeIds: masterReferralEarnings.eligibleRefereeIds,
+        losingLivesPool: masterReferralEarnings.losingLivesPool,
+        commissionLives: masterReferralEarnings.commissionLives,
+        livesToUsdtRate: masterReferralEarnings.livesToUsdtRate,
+        usdtEarned: masterReferralEarnings.usdtEarned,
+        createdAt: masterReferralEarnings.createdAt,
       })
-      .from(referralEarnings)
-      .where(eq(referralEarnings.referrerId, Number(me.sub)))
-      .orderBy(desc(referralEarnings.createdAt))
+      .from(masterReferralEarnings)
+      .where(eq(masterReferralEarnings.masterId, Number(me.sub)))
+      .orderBy(desc(masterReferralEarnings.createdAt))
       .limit(10);
 
     const downlineCountResult = await db

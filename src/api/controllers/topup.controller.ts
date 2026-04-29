@@ -1,16 +1,12 @@
 import type { Context } from "hono";
 import { db } from "../../db";
-import { adminAuditLogs, topupRequests, lifePackages, users, livesTransactions, referralEarnings, notifications, platformSettings } from "../../db/schema";
-import { eq, desc, sql, and, gte } from "drizzle-orm";
+import { adminAuditLogs, topupRequests, lifePackages, users, livesTransactions, notifications, platformSettings } from "../../db/schema";
+import { eq, desc } from "drizzle-orm";
 import type { TokenPayload } from "../../lib/jwt";
 import { broadcastEvent } from "../../ws/handler";
 import { parseBody, safeInt } from "../../lib/validate";
 import { topupCreateSchema } from "../../lib/schemas";
 import { getPublicUrl } from "../../lib/minio";
-
-
-// Referral fee rate: 0.05 USDT per 1 USDT topup downline
-const REFERRAL_FEE_RATE = 0.05;
 
 type TopupPaymentMethod = {
   network: string;
@@ -185,7 +181,7 @@ export const topupController = {
     }
 
     // ── Semua operasi dalam satu transaction (atomic) ──────────────────────
-    const { newBalance, referrerId } = await db.transaction(async (tx) => {
+    const { newBalance } = await db.transaction(async (tx) => {
       // 1. Update status topup
       await tx.update(topupRequests)
         .set({
@@ -213,40 +209,7 @@ export const topupController = {
         refType: "topup",
       });
 
-      // 4. Referral: beri komisi USDT ke referrer (dalam tx yang sama)
-      const [buyer] = await tx
-        .select({ referredBy: users.referredBy })
-        .from(users)
-        .where(eq(users.id, req.userId));
-
-      let referrerId: number | null = null;
-      if (buyer?.referredBy) {
-        referrerId = buyer.referredBy;
-        const usdtEarned = Number(req.usdtAmount) * REFERRAL_FEE_RATE;
-
-        await tx.insert(referralEarnings).values({
-          referrerId,
-          refereeId: req.userId,
-          topupRequestId: req.id,
-          usdtEarned: String(usdtEarned.toFixed(2)),
-          livesEarned: 0,
-        });
-
-        await tx.update(users)
-          .set({ usdtBalance: sql`usdt_balance + ${usdtEarned.toFixed(2)}` })
-          .where(eq(users.id, referrerId));
-
-        await tx.insert(notifications).values({
-          userId: referrerId,
-          type: "payout_credited",
-          title: "Komisi referral masuk",
-          body: `Kamu mendapat ${usdtEarned.toFixed(2)} USDT dari topup referral user #${req.userId}.`,
-          refId: req.id,
-          refType: "referral",
-        });
-      }
-
-      return { newBalance, referrerId };
+      return { newBalance };
     });
 
     await db.insert(adminAuditLogs).values({
@@ -259,7 +222,6 @@ export const topupController = {
         livesAmount: req.livesAmount,
         usdtAmount: req.usdtAmount,
         newBalance,
-        referrerId,
         adminNote: body.adminNote ?? null,
       },
       ipAddress: requestIp(c),

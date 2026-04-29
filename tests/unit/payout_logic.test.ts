@@ -5,7 +5,8 @@ import { describe, expect, it } from "bun:test";
  * - 70% losing pool menjadi prize for winner, dibagi rata per user pemenang.
  * - Winning bet/modal pemenang dikembalikan.
  * - 30% losing pool menjadi prize for admin/system.
- * - Jika loser adalah downline master, 3% dari losing wager masuk ke master.
+ * - Referrer biasa mendapat 3% dari losing wager downline.
+ * - Referrer master mendapat 6% dari losing wager downline.
  */
 function calculatePayout(winningWageredAmount: number, winnerCount: number, totalLosersWagered: number) {
   const prizeForWinner = totalLosersWagered * 0.7;
@@ -22,13 +23,15 @@ function calculatePayout(winningWageredAmount: number, winnerCount: number, tota
   };
 }
 
-function calculateMasterCommission(losingWageredAmount: number, livesToUsdtRate = 1) {
-  const masterCommissionLives = losingWageredAmount * 0.03;
-  const remainingSystemPrizeLives = losingWageredAmount * 0.27;
+function calculateReferralPollCommission(losingWageredAmount: number, isMaster: boolean, livesToUsdtRate = 1) {
+  const commissionRate = 0.03 + (isMaster ? 0.03 : 0);
+  const commissionLives = losingWageredAmount * commissionRate;
+  const remainingSystemPrizeLives = losingWageredAmount * (0.3 - commissionRate);
   return {
-    masterCommissionLives,
+    commissionLives,
+    commissionRate,
     remainingSystemPrizeLives,
-    masterCommissionUsdt: masterCommissionLives * livesToUsdtRate,
+    commissionUsdt: commissionLives * livesToUsdtRate,
   };
 }
 
@@ -69,19 +72,29 @@ describe("Polymarket 70/30 Payout Logic", () => {
     expect(result.totalPayout).toBe(10);
   });
 
-  it("menghitung komisi master dari losing wager downline milik master", () => {
-    const result = calculateMasterCommission(100, 1);
+  it("menghitung komisi poll referral user biasa dari losing wager downline", () => {
+    const result = calculateReferralPollCommission(100, false, 1);
 
-    expect(result.masterCommissionLives).toBe(3);
-    expect(result.masterCommissionUsdt).toBe(3);
+    expect(result.commissionRate).toBe(0.03);
+    expect(result.commissionLives).toBe(3);
+    expect(result.commissionUsdt).toBe(3);
     expect(result.remainingSystemPrizeLives).toBe(27);
   });
 
-  it("mengonversi komisi master ke USDT dengan platform rate", () => {
-    const result = calculateMasterCommission(150, 0.5);
+  it("menghitung komisi poll referral master sebesar 6%", () => {
+    const result = calculateReferralPollCommission(100, true, 1);
 
-    expect(result.masterCommissionLives).toBe(4.5);
-    expect(result.masterCommissionUsdt).toBe(2.25);
+    expect(result.commissionRate).toBe(0.06);
+    expect(result.commissionLives).toBe(6);
+    expect(result.commissionUsdt).toBe(6);
+    expect(result.remainingSystemPrizeLives).toBe(24);
+  });
+
+  it("mengonversi komisi referral poll ke USDT dengan platform rate", () => {
+    const result = calculateReferralPollCommission(150, false, 0.5);
+
+    expect(result.commissionLives).toBe(4.5);
+    expect(result.commissionUsdt).toBe(2.25);
     expect(result.remainingSystemPrizeLives).toBe(40.5);
   });
 });

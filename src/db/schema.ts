@@ -223,7 +223,7 @@ export const livesTransactions = pgTable("lives_transactions", {
 }));
 
 // ─── Referral Earnings ─────────────────────────────────────────────────────
-// Track komisi referral (0.05 USDT per topup downline)
+// Legacy ledger komisi referral topup. Flow topup baru tidak lagi memberi komisi referral.
 export const referralEarnings = pgTable("referral_earnings", {
   id: serial("id").primaryKey(),
   referrerId: integer("referrer_id").references(() => users.id).notNull(),
@@ -235,7 +235,8 @@ export const referralEarnings = pgTable("referral_earnings", {
 });
 
 // ─── Master Referral Earnings ───────────────────────────────────────────────
-// Komisi 3% dari losing bet lives downline master saat poll resolve, dikonversi ke USDT
+// Ledger komisi poll referral saat downline kalah, dikonversi ke USDT.
+// Nama tabel historis masih "master", tapi dipakai untuk referrer biasa maupun master.
 export const masterReferralEarnings = pgTable("master_referral_earnings", {
   id: serial("id").primaryKey(),
   masterId: integer("master_id").references(() => users.id).notNull(),

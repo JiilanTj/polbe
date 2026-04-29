@@ -26,7 +26,8 @@ function requestIp(c: Context) {
 
 const WINNER_PRIZE_RATE = 0.7;
 const SYSTEM_PRIZE_RATE = 0.3;
-const MASTER_COMMISSION_RATE = 0.03;
+const REFERRAL_COMMISSION_RATE = 0.03;
+const MASTER_EXTRA_COMMISSION_RATE = 0.03;
 
 // ─── Helper: kredit/debit nyawa + catat transaksi ──────────────────────────
 async function adjustLives(
@@ -569,13 +570,15 @@ export const pollsController = {
 
     const [settings] = await db.select({ livesToUsdtRate: platformSettings.livesToUsdtRate }).from(platformSettings).limit(1);
     const livesToUsdtRate = Number(settings?.livesToUsdtRate ?? 1);
-    const masterCommissionsByMaster = new Map<number, {
+    const referralCommissionsByReferrer = new Map<number, {
       eligibleRefereeIds: Set<number>;
       losingLivesPool: number;
       commissionLives: number;
+      isMaster: boolean;
     }>();
-    const masterCommissions: Array<{
-      masterId: number;
+    const referralCommissions: Array<{
+      referrerId: number;
+      isMaster: boolean;
       eligibleRefereeIds: number[];
       losingLivesPool: number;
       commissionLives: number;
@@ -590,31 +593,34 @@ export const pollsController = {
         .where(eq(users.id, refereeId));
       if (!referee?.referredBy) continue;
 
-      const [master] = await db
+      const [referrer] = await db
         .select({ id: users.id, role: users.role, isMaster: users.isMaster, isActive: users.isActive })
         .from(users)
         .where(eq(users.id, referee.referredBy));
-      if (!master?.isMaster || !master.isActive || master.role !== "user") continue;
+      if (!referrer?.isActive || referrer.role !== "user") continue;
 
-      const existing = masterCommissionsByMaster.get(master.id) ?? ({
+      const existing = referralCommissionsByReferrer.get(referrer.id) ?? ({
         eligibleRefereeIds: new Set<number>(),
         losingLivesPool: 0,
         commissionLives: 0,
+        isMaster: referrer.isMaster,
       });
+      const commissionRate = REFERRAL_COMMISSION_RATE + (referrer.isMaster ? MASTER_EXTRA_COMMISSION_RATE : 0);
       existing.eligibleRefereeIds.add(refereeId);
       existing.losingLivesPool += losingLives;
-      existing.commissionLives += losingLives * MASTER_COMMISSION_RATE;
-      masterCommissionsByMaster.set(master.id, existing);
+      existing.commissionLives += losingLives * commissionRate;
+      existing.isMaster = existing.isMaster || referrer.isMaster;
+      referralCommissionsByReferrer.set(referrer.id, existing);
     }
 
-    for (const [masterId, commission] of masterCommissionsByMaster.entries()) {
+    for (const [referrerId, commission] of referralCommissionsByReferrer.entries()) {
       const commissionLives = commission.commissionLives;
       const usdtEarned = commissionLives * livesToUsdtRate;
       if (usdtEarned <= 0) continue;
       const eligibleRefereeIds = [...commission.eligibleRefereeIds];
 
       const [earning] = await db.insert(masterReferralEarnings).values({
-        masterId,
+        masterId: referrerId,
         pollId,
         eligibleRefereeIds,
         losingLivesPool: commission.losingLivesPool.toFixed(6),
@@ -627,27 +633,29 @@ export const pollsController = {
       await db
         .update(users)
         .set({ usdtBalance: sql`usdt_balance + ${usdtEarned.toFixed(2)}` })
-        .where(eq(users.id, masterId));
+        .where(eq(users.id, referrerId));
 
       await db.insert(notifications).values({
-        userId: masterId,
+        userId: referrerId,
         type: "payout_credited",
-        title: "Komisi master referral masuk",
-        body: `Kamu mendapat ${usdtEarned.toFixed(2)} USDT dari komisi master referral poll #${pollId}.`,
+        title: "Komisi referral poll masuk",
+        body: `Kamu mendapat ${usdtEarned.toFixed(2)} USDT dari komisi referral poll #${pollId}.`,
         refId: pollId,
-        refType: "master_referral",
+        refType: "poll_referral",
       });
 
-      broadcastEvent("master_referral:commission", {
+      broadcastEvent("poll_referral:commission", {
         pollId,
         eligibleRefereeIds,
+        isMaster: commission.isMaster,
         losingLivesPool: commission.losingLivesPool,
         commissionLives,
         usdtEarned,
-      }, `user:${masterId}`);
+      }, `user:${referrerId}`);
 
-      masterCommissions.push({
-        masterId,
+      referralCommissions.push({
+        referrerId,
+        isMaster: commission.isMaster,
         eligibleRefereeIds,
         losingLivesPool: commission.losingLivesPool,
         commissionLives,
@@ -673,7 +681,7 @@ export const pollsController = {
           prizeForWinner,
           prizeForSystem,
           bonusPerWinningUser,
-          masterCommissions,
+          referralCommissions,
         },
         ipAddress: requestIp(c),
       });
