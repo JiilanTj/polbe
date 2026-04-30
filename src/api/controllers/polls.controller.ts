@@ -29,6 +29,10 @@ const SYSTEM_PRIZE_RATE = 0.3;
 const REFERRAL_COMMISSION_RATE = 0.03;
 const MASTER_EXTRA_COMMISSION_RATE = 0.03;
 
+function formatTokenAmount(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(6).replace(/\.?0+$/, "");
+}
+
 // ─── Helper: kredit/debit nyawa + catat transaksi ──────────────────────────
 async function adjustLives(
   userId: number,
@@ -544,25 +548,32 @@ export const pollsController = {
 
       for (const [userIdStr, amount] of Object.entries(userPayouts)) {
         const userId = Number(userIdStr);
+        const refundTokens = winnerWagersByUser[userId] ?? 0;
+        const profitTokens = bonusPerWinningUser;
         await adjustLives(
           userId,
           amount,
           "vote_payout",
           pollId,
           "poll",
-          `Menang poll #${pollId} - Refund ${winnerWagersByUser[userId]} nyawa + bonus ${bonusPerWinningUser} nyawa`,
+          `Menang poll #${pollId} - refund ${formatTokenAmount(refundTokens)} Token + profit ${formatTokenAmount(profitTokens)} Token`,
         );
 
         await db.insert(notifications).values({
           userId,
           type: "payout_credited",
           title: "Kamu Menang!",
-          body: `Selamat! Kamu mendapatkan ${amount} nyawa dari poll: ${poll.title}`,
+          body: `Refund ${formatTokenAmount(refundTokens)} Token + profit ${formatTokenAmount(profitTokens)} Token = total ${formatTokenAmount(amount)} Token. Market: ${poll.title}`,
           refId: pollId,
           refType: "poll",
         });
 
-        broadcastEvent("poll:payout", { pollId, payout: amount }, `user:${userId}`);
+        broadcastEvent("poll:payout", {
+          pollId,
+          refundTokens,
+          profitTokens,
+          payout: amount,
+        }, `user:${userId}`);
       }
     } else {
       for (const vote of losersVotes) {
@@ -577,6 +588,26 @@ export const pollsController = {
     losersVotes.forEach((vote) => {
       losingWagersByUser[vote.userId] = (losingWagersByUser[vote.userId] || 0) + Number(vote.livesWagered);
     });
+
+    const winnerUserSet = new Set(winnerUserIds);
+    for (const [userIdStr, amount] of Object.entries(losingWagersByUser)) {
+      const userId = Number(userIdStr);
+      if (winnerUserSet.has(userId)) continue;
+
+      await db.insert(notifications).values({
+        userId,
+        type: "poll_resolved",
+        title: "Market selesai",
+        body: `Outcome kamu belum tepat. Token yang digunakan: ${formatTokenAmount(amount)}. Market: ${poll.title}`,
+        refId: pollId,
+        refType: "poll",
+      });
+
+      broadcastEvent("poll:loss", {
+        pollId,
+        lostTokens: amount,
+      }, `user:${userId}`);
+    }
 
     const [settings] = await db.select({ livesToUsdtRate: platformSettings.livesToUsdtRate }).from(platformSettings).limit(1);
     const livesToUsdtRate = Number(settings?.livesToUsdtRate ?? 1);
