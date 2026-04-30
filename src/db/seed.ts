@@ -5,7 +5,7 @@
  *  1. Admin user    — admin@polymarket.dev / Admin1234!
  *  2. Platform user — platform@polymarket.dev / Platform1234!
  *  3. 3 demo user   — user1/2/3@polymarket.dev / User1234!
- *  4. 6 life packages (Starter → Whale)
+ *  4. 6 life packages (Starter → Master)
  *  5. Platform settings (withdrawal fee 1%)
  *  6. 5 sample polls (active, berbagai kategori)
  */
@@ -105,7 +105,7 @@ async function seedPackages() {
     { label: "Value", usdtPrice: "10", livesAmount: 15, sortOrder: 3 },
     { label: "Pro", usdtPrice: "50", livesAmount: 80, sortOrder: 4 },
     { label: "Elite", usdtPrice: "100", livesAmount: 180, sortOrder: 5 },
-    { label: "Whale", usdtPrice: "500", livesAmount: 1000, sortOrder: 6 },
+    { label: "Master", usdtPrice: "500", livesAmount: 1000, sortOrder: 6 },
   ];
 
   for (const pkg of packages) {
